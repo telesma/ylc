@@ -8,16 +8,25 @@ jsep.addBinaryOp("@", 10);
 
 module.exports = {};
 
-module.exports.newContext = function newContext(model, controller) {
+module.exports.newContext = function newContext(
+        model,
+        controller,
+        controllerMethods,
+        loopContextMemento
+) {
 
     var my = {
             model: model,
             controller: controller,
-            loopVariables: {},
-            loopStatuses: {}
+            controllerMethods: controllerMethods,
+            loopVariables:
+                (loopContextMemento && loopContextMemento.loopVariables) ?
+                    loopContextMemento.loopVariables : {},
+            loopStatuses:
+                (loopContextMemento && loopContextMemento.loopStatuses) ?
+                    loopContextMemento.loopStatuses : {}
         },
-        that = {
-        };
+        that = {};
 
     /*
      * PRIVATE FUNCTIONS:
@@ -146,9 +155,9 @@ module.exports.newContext = function newContext(model, controller) {
             evaluatedArguments = [],
             idxArgument;
 
-        if (my.controller[functionName] instanceof Function) {
+        if (my.controllerMethods[functionName]) {
             parentObject = my.controller;
-            fn = my.controller[functionName];
+            fn = my.controllerMethods[functionName].code;
 
         } else if (my.model[functionName] instanceof Function) {
             parentObject = my.model;
@@ -245,11 +254,6 @@ module.exports.newContext = function newContext(model, controller) {
                 } else if (array === null) {
                     return null;
 
-                } else if (!$.isArray(array)) {
-                    throw errorUtil.createError(
-                        "The '@' operator can only be used on arrays, null and undefined."
-                    );
-
                 } else {
 
                     if (!hasValue(array[indexValue]) && (adHocValue !== undefined)) {
@@ -263,11 +267,6 @@ module.exports.newContext = function newContext(model, controller) {
 
             setter: function(ast, value) {
                 var array = gsAstValue(ast.left, undefined, []);
-                if (!$.isArray(array)) {
-                    throw errorUtil.createError(
-                        "The '@' operator can only be used on arrays, null and undefined."
-                    );
-                }
                 array[gsAstValue(ast.right)] = value;
             }
         },
@@ -299,11 +298,7 @@ module.exports.newContext = function newContext(model, controller) {
                 var objectValue = gsAstValue(ast.object, undefined, forceSet ? {} : undefined),
                     propertyName = ast.property.name;
 
-                if (!(objectValue instanceof Object)) {
-                    throw errorUtil.createError(
-                        "Left hand side of the '.' operator must be an object."
-                    );
-                }
+                sanityCheck.checkObjectSanity(objectValue);
 
                 objectValue[propertyName] = value;
             }
@@ -334,11 +329,6 @@ module.exports.newContext = function newContext(model, controller) {
                 } else if (objectValue === null) {
                     return null;
 
-                } else if (!$.isPlainObject(objectValue)) {
-                    throw errorUtil.createError(
-                        "Left hand side of the '#' operator must be an object, null or undefined."
-                    );
-
                 } else {
                     if (!hasValue(objectValue[propertyName]) && (adHocValue !== undefined)) {
                         objectValue[propertyName] = adHocValue;
@@ -350,11 +340,6 @@ module.exports.newContext = function newContext(model, controller) {
 
             setter: function(ast, value) {
                 var objectValue = gsAstValue(ast.left, undefined, {});
-                if (!$.isPlainObject(objectValue)) {
-                    throw errorUtil.createError(
-                        "Left hand side of the '#' operator must be an object, null or undefined."
-                    );
-                }
                 objectValue[ast.right.name] = value;
             }
         },
@@ -472,6 +457,7 @@ module.exports.newContext = function newContext(model, controller) {
      * PUBLIC FUNCTIONS:
      */
 
+
     /*
      * enterIteration:
      */
@@ -527,6 +513,7 @@ module.exports.newContext = function newContext(model, controller) {
         strLoopVariableName,
         strStatusVariableName
     ) {
+
         my.loopVariables[strLoopVariableName] = undefined;
         if (strStatusVariableName !== undefined) {
             my.loopStatuses[strStatusVariableName] = undefined;
@@ -547,16 +534,34 @@ module.exports.newContext = function newContext(model, controller) {
         gsExpressionValue(strExpression, value, forceSet);
     };
 
-    that.newWithEmptyLoopVariables = function () {
-        return newContext(my.model, my.controller);
-    };
-
-    that.getModel = function () {
-        return my.model;
-    };
-
     that.getLoopStatusesSnapshot = function () {
         return $.extend(true, {}, my.loopStatuses);
+    };
+
+    that.getLoopContextMemento = function() {
+        var currentLoopVariable,
+            loopVariablesSnapshot = {};
+
+        for (currentLoopVariable in my.loopVariables) {
+            if (my.loopVariables.hasOwnProperty(currentLoopVariable)) {
+                loopVariablesSnapshot[currentLoopVariable] =
+                    $.extend({}, my.loopVariables[currentLoopVariable]);
+            }
+        }
+
+        return {
+            loopVariables: loopVariablesSnapshot,
+            loopStatuses: $.extend(true, {}, my.loopStatuses)
+        };
+    };
+
+    that.newWithLoopContext = function (loopContextMemento) {
+        return module.exports.newContext(
+            my.model,
+            my.controller,
+            my.controllerMethods,
+            loopContextMemento
+        );
     };
 
     return that;

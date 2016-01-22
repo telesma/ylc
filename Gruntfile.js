@@ -7,7 +7,8 @@ module.exports = function(grunt) {
     browserify: {
       dist: {
         files: {
-          'tmp/yellowCode.js': ['src/yellowCode.js']
+          'tmp/yellowCode.js': ['src/yellowCode.js'],
+          'tmp/nakedYellowCode.js': ['src/nakedYellowCode.js']
         }
       }
     },
@@ -34,7 +35,11 @@ module.exports = function(grunt) {
           {
             expand: true,
             flatten: true,
-            src: ["tmp/yellowCode.min.js", "tmp/yellowCode.min.js.map"],
+            src: [
+              "tmp/yellowCode.min.js",
+              "tmp/yellowCode.min.js.map",
+              "tmp/nakedYellowCode.js"
+            ],
             dest: "dist/tests"
           },
           {
@@ -48,6 +53,14 @@ module.exports = function(grunt) {
             flatten: true,
             src: ["resources/site/examples/*"],
             dest: "dist/site/examples"
+          }
+        ]
+      },
+      dummyUglify: {
+        files: [
+          {
+            src: ['tmp/yellowCode.js'],
+            dest: 'tmp/yellowCode.min.js'
           }
         ]
       }
@@ -144,6 +157,7 @@ module.exports = function(grunt) {
         'clean:before_dist',
         'browserify',
         'uglify',
+        //'copy:dummyUglify',
         'usebanner',
         'copy',
         'subgrunt',
