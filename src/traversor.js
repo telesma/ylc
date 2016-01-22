@@ -675,10 +675,10 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             nElementsProcessed = 1;
 
         } else {
+        		m2vSetValues(domElement);
             if (bBindEvents) {
                 m2vBindEvents(domElement);
             }
-            m2vSetValues(domElement);
             $(domElement).removeClass("ylcInvisibleTemplate");
             m2vProcessChildren(domElement, bBindEvents);
 
