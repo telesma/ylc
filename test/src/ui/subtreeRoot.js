@@ -1,50 +1,31 @@
-<!DOCTYPE html>
-<html xmlns:mynamespace="http://www.w3.org/1999/xhtml">
-<head lang="en">
-    <meta charset="UTF-8">
-    <title></title>
-    <script src="//code.jquery.com/jquery-1.11.1.min.js"></script>
-    <script src="yellowCode.min.js"></script>
+var test = require("tape"),
+    fs = require('fs'),
+    testUtil = require("../common/testUtil");
 
-    <style>
-        .ylcInvisibleTemplate {display: none !important;}
-    </style>
-</head>
+testUtil.setUp();
 
-<body>
+function getCurrentColorBoxes(jqFixture) {
+    return jqFixture.children().first().find(".currentColorBox:visible");
+}
 
-    <!-- inner widget definition -->
+function getSelectColorBoxes(jqFixture) {
+    return jqFixture.children().first().find(".selectColorBox:visible");
+}
 
-    <div id="colorWidgetHtml">
-        <div
-             class="ylcInvisibleTemplate"
-             style="width: 500px; min-height: 30px; border: 1px solid; margin: 10px; padding: 10px">
+function getColor(jqFixture, index) {
+    return getCurrentColorBoxes(jqFixture).eq(index).css("background-color");
+}
 
-            <div>
-                <strong>current color:</strong>
-                <div
-                        style="width: 40px; height: 20px; border: 2px solid; margin-left: auto; margin-right: auto; display: inline-block; vertical-align: middle;"
-                        data-ylcBind="css.background-color: currentColor"
-                        data-ylcEvents="click: enableEdit">
-                </div>
-            </div>
+test(
+    "subtree root",
+    function (t) {
 
-            <div data-ylcIf="edit">
+        var jqFixture =
+                testUtil.setUpFixture(
+                    fs.readFileSync(__dirname + "/subtreeRoot.html")
+                ),
+            jqDynamicallyGeneratedElements;
 
-                edit: <span data-ylcBind="text: edit"></span>
-                <div
-                    data-ylcLoop="color,colorStatus: colors"
-                    style="width: 20px; height: 20px; border: 2px solid; display: inline-block; margin: 3px"
-                    data-ylcBind="css.background-color: color"
-                    data-ylcEvents="click: changeColor">
-                </div>
-
-            </div>
-
-        </div>
-    </div>
-
-    <script>
         (function($) {
 
             function createController() {
@@ -93,14 +74,14 @@
 
             function init(jqTopDiv) {
                 var jqView;
-                jqTopDiv.html($("#colorWidgetHtml").html());
+                jqTopDiv.html(jqFixture.children().first().find("#colorWidgetHtml").html());
                 jqView = $(jqTopDiv.children().get());
                 jqView.yellowCode(createController());
             }
 
             $.fn.colorWidget = function(arg1, arg2) {
                 var jqTopDiv = $(this),
-                        jqView;
+                    jqView;
 
                 if (arg1 === undefined) {
                     init(jqTopDiv);
@@ -116,33 +97,20 @@
             };
 
         }(jQuery));
-    </script>
-
-
-    <!-- outer widget definition -->
-
-    <div id="colors">
-        <div data-ylcLoop="color: colors"
-            data-ylcEvents="ylcElementInitialized: initColorWidgetPlugin"
-            data-ylcBind="colorWidget.color: color"></div>
-        <button data-ylcEvents="click: reverse">Click</button>
-    </div>
-
-    <script>
 
         var controller = {
             init: function (model) {
                 model.colors = [
-                        "red",
-                        "black",
-                        "blue",
-                        "brown",
-                        "yellow",
-                        "crimson",
-                        "green",
-                        "orange",
-                        "violet",
-                        "white"
+                    "red",
+                    "black",
+                    "blue",
+                    "brown",
+                    "yellow",
+                    "crimson",
+                    "green",
+                    "orange",
+                    "violet",
+                    "white"
                 ];
             },
 
@@ -151,7 +119,6 @@
             },
 
             reverse: function(model, context) {
-                console.log(model);
                 var idxLeft = 0,
                     idxRight = model.colors.length - 1,
                     newLeft,
@@ -164,7 +131,6 @@
                     idxLeft += 1;
                     idxRight -= 1;
                 }
-                console.log(model);
             },
 
             "@BeforeEvent": {
@@ -181,11 +147,78 @@
 
         };
 
-        $("#colors").yellowCode(controller);
+        jqFixture.children().first().find("#colors").yellowCode(controller);
 
-    </script>
+        var i;
+        for (i = 0; i < 10; i += 1) {
+            getCurrentColorBoxes(jqFixture).eq(i).trigger("click");
+            getSelectColorBoxes(jqFixture).eq(i + 3).trigger("click");
+        }
 
+        jqFixture.children().first().find("button:visible").trigger("click");
 
-</body>
+        t.equal(
+            getColor(jqFixture, 0),
+            "rgb(255, 165, 0)",
+            "color correct (box 1)"
+        );
 
-</html>
+        t.equal(
+            getColor(jqFixture, 1),
+            "rgb(220, 20, 60)",
+            "color correct (box 2)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 2),
+            "rgb(128, 128, 128)",
+            "color correct (box 3)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 3),
+            "rgb(165, 42, 42)",
+            "color correct (box 4)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 4),
+            "rgb(0, 0, 0)",
+            "color correct (box 5)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 5),
+            "rgb(255, 255, 255)",
+            "color correct (box 6)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 6),
+            "rgb(255, 255, 0)",
+            "color correct (box 7)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 7),
+            "rgb(255, 0, 255)",
+            "color correct (box 8)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 8),
+            "rgb(0, 255, 255)",
+            "color correct (box 9)"
+        );
+
+        t.equal(
+            getColor(jqFixture, 9),
+            "rgb(0, 0, 255)",
+            "color correct (box 10)"
+        );
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
