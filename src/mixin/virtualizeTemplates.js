@@ -2,7 +2,8 @@ var errorUtil = require('../errorUtil'),
     parseUtil = require('../parseUtil'),
     domTemplates = require("../domTemplates"),
     ylcLoopParser = require('../parser/ylcLoop'),
-    stringUtil = require("../stringUtil");
+    stringUtil = require("../stringUtil"),
+    expressionParser = require('../expressionParser');
 
 module.exports = {
 
@@ -11,7 +12,8 @@ module.exports = {
             nodeStart: function(jqNode, metadata) {
 
                 var strYlcLoop = stringUtil.strGetData(jqNode, "ylcLoop"),
-                    strYlcIf = stringUtil.strGetData(jqNode, "ylcIf");
+                    strYlcIf = stringUtil.strGetData(jqNode, "ylcIf"),
+                    bRemoveTag = (stringUtil.strGetData(jqNode, "ylcRemoveTag") !== undefined);
 
                 if (strYlcLoop && strYlcIf) {
                     throw errorUtil.createError(
@@ -25,16 +27,30 @@ module.exports = {
                     metadata.ylcLoop = ylcLoopParser.parseYlcLoop(strYlcLoop);
 
                 } else if (strYlcIf) {
-                    metadata.ylcIf = parseUtil.normalizeWhitespace(strYlcIf);
+                    metadata.astYlcIf = expressionParser.toAst(parseUtil.normalizeWhitespace(strYlcIf));
 
                 } else {
+                    if (bRemoveTag) {
+                        throw errorUtil.createError(
+                            "The data-ylcRemoveTag attribute can only be used in conjunction with data-ylcIf and " +
+                            "data-ylcLoop attributes.",
+                            jqNode
+                        );
+                    }
+                    
                     return false;
                 }
 
+                metadata.bRemoveTag = bRemoveTag;
+                
                 jqNode.removeAttr("data-ylcLoop");
                 jqNode.removeAttr("data-ylcIf");
 
-                return true;
+                return {
+                    bMakeVirtual: true,
+                    bHasV2m: false,
+                    bHasM2v: true
+                };
 
             },
 

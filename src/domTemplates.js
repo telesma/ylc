@@ -1,14 +1,13 @@
 var stringUtil = require("./stringUtil"),
     errorUtil = require("./errorUtil"),
     domAnnotator = require('./domAnnotator'),
-    virtualNodes = require('./virtualNodes');
+    virtualNodes = require('./virtualNodes'),
+    metadata = require('./metadata');
 
 module.exports = (function () {
 
     function isDynamicallyGenerated(domElement) {
-        var jqElement = $(domElement);
-        return jqElement.hasClass("_ylcDynamicallyGenerated") ||
-            jqElement.attr("data-_ylcDynamicallyGenerated") === "true";
+        return (!virtualNodes.isVirtual($(domElement))) && metadata.localOf($(domElement)).dynamicallyGenerated;
     }
 
     function findIncludingRoot(jqElement, selector) {
@@ -50,7 +49,7 @@ module.exports = (function () {
         var strYlcLoop = stringUtil.strGetData(jqElement, "ylcLoop"),
             strIf = stringUtil.strGetData(jqElement, "ylcIf");
 
-        if (!isDynamicallyGenerated(jqElement.get()) && jqElement.data("_ylcMetadata") && (jqElement.data("_ylcMetadata").ylcLoop || jqElement.data("_ylcMetadata").ylcIf)) {
+        if (!isDynamicallyGenerated(jqElement.get()) && (metadata.of(jqElement).ylcLoop || metadata.of(jqElement).astYlcIf)) {
             return true;
         }
 
@@ -87,9 +86,15 @@ module.exports = (function () {
                     strRewriteIdsInTemplateTo
                 );
 
-                jqClone = jqTemplate.clone(true);
-                jqClone.addClass("_ylcDynamicallyGenerated");
-                jqClone.attr("data-_ylcDynamicallyGenerated", "true");
+                jqClone = metadata.safeClone(jqTemplate);
+
+                metadata.localOf(jqClone).dynamicallyGenerated = true;
+                if (metadata.of(jqClone).bRemoveTag) {
+                    jqClone.children().each(function() {
+                        metadata.localOf($(this)).dynamicallyGenerated = true;
+                    });
+                }
+
                 domAnnotator.unmarkViewRoot(jqClone);
 
                 reintroduceIdsInClonedSubtree(jqClone, strRewriteIdsInTemplateTo);
