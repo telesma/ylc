@@ -1,6 +1,7 @@
 var stringUtil = require("./stringUtil"),
     errorUtil = require("./errorUtil"),
-    domAnnotator = require('./domAnnotator');
+    domAnnotator = require('./domAnnotator'),
+    virtualNodes = require('./virtualNodes');
 
 module.exports = (function () {
 
@@ -45,20 +46,34 @@ module.exports = (function () {
         });
     }
 
+    function isTemplate(jqElement) {
+        var strYlcLoop = stringUtil.strGetData(jqElement, "ylcLoop"),
+            strIf = stringUtil.strGetData(jqElement, "ylcIf");
+
+        if (!isDynamicallyGenerated(jqElement.get()) && jqElement.data("_ylcMetadata") && (jqElement.data("_ylcMetadata").ylcLoop || jqElement.data("_ylcMetadata").ylcIf)) {
+            return true;
+        }
+
+        return (strYlcLoop || strIf) && !isDynamicallyGenerated(jqElement.get());
+    }
+
     return {
 
         isDynamicallyGenerated: function (domElement) {
             return isDynamicallyGenerated(domElement);
         },
 
-        isTemplate: function (domElement) {
-            var jqElement = $(domElement),
-                strYlcLoop = stringUtil.strGetData(jqElement, "ylcLoop"),
-                strIf = stringUtil.strGetData(jqElement, "ylcIf");
+        makeTemplateVirtual: function(jqElement) {
+            if (!isTemplate(jqElement)) {
+                return jqElement;
 
-            return (strYlcLoop || strIf) ?
-                !isDynamicallyGenerated(domElement) :
-                false;
+            } else {
+                return virtualNodes.makeVirtual(jqElement);
+            }
+        },
+
+        isTemplate: function (domElement) {
+            return isTemplate(virtualNodes.getOriginal($(domElement)));
         },
 
         jqCreateElementFromTemplate:
@@ -72,7 +87,7 @@ module.exports = (function () {
                     strRewriteIdsInTemplateTo
                 );
 
-                jqClone = jqTemplate.clone();
+                jqClone = jqTemplate.clone(true);
                 jqClone.addClass("_ylcDynamicallyGenerated");
                 jqClone.attr("data-_ylcDynamicallyGenerated", "true");
                 domAnnotator.unmarkViewRoot(jqClone);

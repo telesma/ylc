@@ -7,14 +7,18 @@ var errorUtil = require('./errorUtil'),
     ylcLoopParser = require('./parser/ylcLoop'),
     domAnnotator = require('./domAnnotator'),
     contextFactory = require('./contextFactory'),
-    annotationProcessor = require('./annotationProcessor');
+    annotationProcessor = require('./annotationProcessor'),
+    virtualNodes = require('./virtualNodes'),
+    micVirtualize = require('./mic/virtualizeTemplates'),
+    micProcessBindingParameters = require('./mic/processBindingParameters'),
+    micM2v = require('./mic/m2v'),
+    micV2m = require('./mic/v2m');
 
 module.exports = {};
 
 module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     var EMPTY_FUNCTION = function () {},
-        PREFIELD = {},
         my = {};
 
     function m2vOnlyAnnotationListener(annotation, code, metadata) {
@@ -32,66 +36,51 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         }
     }
 
-    function extractControllerMethods(controller) {
+    function domPreprocessAnnotationListener(annotation, code, metadata) {
+        if (annotation === "@DomPreprocessorFactory") {
+            my.callbacks.domPreprocessors.push(code());
+        }
+    }
+
+    function extractControllerMethods(mixins, controller) {
+
+        $.each(
+            mixins,
+            function(idx, mixin) {
+                annotationProcessor.processAnnotations(
+                    mixin,
+                    [
+                        m2vOnlyAnnotationListener,
+                        beforeAfterEventAnnotationListener,
+                        domPreprocessAnnotationListener
+                    ]
+                );
+            }
+        );
+
         return annotationProcessor.processAnnotations(
             controller,
             [
                 m2vOnlyAnnotationListener,
-                beforeAfterEventAnnotationListener
+                beforeAfterEventAnnotationListener,
+                domPreprocessAnnotationListener
             ]
         );
     }
 
     function v2mSetValues(domElement) {
 
-        var jqElement = $(domElement),
-            strYlcBind = stringUtil.strGetData(jqElement, "ylcBind"),
-            arrYlcBind = ylcBindParser.parseYlcBind(strYlcBind),
-            idxYlcBind,
-            currentYlcBinding,
-            fnGetter,
-            value,
-            forceSet;
+        var jqElement = $(domElement);
 
-        for (idxYlcBind = 0; idxYlcBind < arrYlcBind.length; idxYlcBind += 1) {
-            currentYlcBinding = arrYlcBind[idxYlcBind];
-
-            if (currentYlcBinding.strMappingOperator !== ylcBindParser.MAPPING_BIDIRECTIONAL &&
-                currentYlcBinding.strMappingOperator !== ylcBindParser.MAPPING_V2M_ONLY &&
-                currentYlcBinding.strMappingOperator !== ylcBindParser.MAPPING_V2M_ONLY_FORCED) {
-                continue;
-            }
-
-            forceSet = currentYlcBinding.strMappingOperator === ylcBindParser.MAPPING_V2M_ONLY_FORCED;
-
-            if (stringUtil.isEmpty(currentYlcBinding.strPropertyName)) {
-                value = jqElement.get();
-
-            } else {
-                fnGetter = jqElement[currentYlcBinding.strPropertyName];
-
-                if (!fnGetter instanceof Function) {
-                    throw errorUtil.createError(
-                        "Cannot find jQuery getter/setter called '" +
-                        currentYlcBinding.strPropertyName + "'.",
-                        my.domView
-                    );
+        if (jqElement.data("_ylcMetadata")) {
+            $.each(
+                jqElement.data("_ylcMetadata").v2m,
+                function (idx, v2m) {
+                    v2m(domElement, my.context);
                 }
-
-                if (currentYlcBinding.strSubpropertyName === undefined) {
-                    value = fnGetter.call(jqElement);
-                } else {
-                    value = fnGetter.call(jqElement, currentYlcBinding.strSubpropertyName);
-                }
-            }
-
-            try {
-                my.context.setValue(currentYlcBinding.strBindingExpression, value, forceSet);
-
-            } catch (err) {
-                throw errorUtil.elementToError(err, domElement);
-            }
+            );
         }
+
     }
 
     function getGeneratedElements(jqTemplate) {
@@ -124,21 +113,13 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function v2mProcessDynamicElements(jqTemplate) {
 
-        var strYlcLoop = stringUtil.strGetData(jqTemplate, "ylcLoop"),
-            strYlcIf = stringUtil.strGetData(jqTemplate, "ylcIf");
+        var metadata = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata");
 
-        if (strYlcLoop && strYlcIf) {
-            throw errorUtil.createError(
-                "An element contains both data-ylcLoop and data-ylcIf.",
-                jqTemplate.get()
-            );
-        }
-
-        if (strYlcLoop) {
+        if (metadata.ylcLoop) {
             return v2mProcessDynamicLoopElements(jqTemplate);
         }
 
-        if (strYlcIf) {
+        if (metadata.ylcIf) {
             return v2mProcessDynamicIfElements(jqTemplate);
         }
 
@@ -150,10 +131,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         var nElementsProcessed;
 
         if (domTemplates.isTemplate(domElement)) {
-            nElementsProcessed = v2mProcessDynamicElements(
-                $(domElement),
-                my.controller
-            );
+            nElementsProcessed = v2mProcessDynamicElements($(domElement), my.controller);
 
         } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
             nElementsProcessed = 1;
@@ -168,8 +146,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     }
 
     function v2mProcessDynamicLoopElements(jqTemplate) {
+
         var idxWithinDynamicallyGenerated,
-            ylcLoop = ylcLoopParser.parseYlcLoop(stringUtil.strGetData(jqTemplate, "ylcLoop")),
+            ylcLoop = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata").ylcLoop,
             arrCollection = my.context.getValue(ylcLoop.strCollectionName),
             domarrGeneratedElements = getGeneratedElements(jqTemplate),
             domDynamicallyGeneratedElement,
@@ -233,71 +212,16 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     // propagating changes of model into view
 
     function m2vSetValues(domElement) {
-        var jqElement = $(domElement),
-            strYlcBind = stringUtil.strGetData(jqElement, "ylcBind"),
-            arrYlcBind = ylcBindParser.parseYlcBind(strYlcBind),
+        var jqElement = $(domElement);
 
-            index,
-            currentYlcBinding,
-            fnGetterSetter,
-            value,
-            existingValue;
-
-        for (index = 0; index < arrYlcBind.length; index += 1) {
-            currentYlcBinding = arrYlcBind[index];
-
-            if (currentYlcBinding.strMappingOperator !== ylcBindParser.MAPPING_BIDIRECTIONAL &&
-                currentYlcBinding.strMappingOperator !== ylcBindParser.MAPPING_M2V_ONLY) {
-                continue;
-            }
-
-            // an empty property maps straight to the DOM element, which is read only
-            if (stringUtil.isEmpty(currentYlcBinding.strPropertyName)) {
-                continue;
-            }
-
-            fnGetterSetter = jqElement[currentYlcBinding.strPropertyName];
-            if (!(fnGetterSetter instanceof Function)) {
-                throw errorUtil.createError(
-                    "Cannot find jQuery getter/setter called '" +
-                    currentYlcBinding.strPropertyName + "'.",
-                    domElement
-                );
-            }
-
-            try {
-                value = my.context.getValue(currentYlcBinding.strBindingExpression);
-
-            } catch (err) {
-                throw errorUtil.elementToError(err, domElement);
-            }
-
-            if (value !== PREFIELD) {
-
-                if (currentYlcBinding.strSubpropertyName === undefined) {
-                    existingValue = fnGetterSetter.call(jqElement);
-
-                } else {
-                    existingValue =
-                        fnGetterSetter.call(jqElement, currentYlcBinding.strSubpropertyName);
+        if (jqElement.data("_ylcMetadata")) {
+            $.each(
+                jqElement.data("_ylcMetadata").m2v,
+                function (idx, m2v) {
+                    m2v(domElement, my.context);
                 }
-
-                if (value !== existingValue) {
-                    if (currentYlcBinding.strSubpropertyName === undefined) {
-                        fnGetterSetter.call(jqElement, value);
-
-                    } else {
-                        fnGetterSetter.call(
-                            jqElement,
-                            currentYlcBinding.strSubpropertyName,
-                            value
-                        );
-                    }
-                }
-            }
-
+            );
         }
-
     }
 
     function processCommonElements(
@@ -353,7 +277,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         jqLastElement = jqLastCommonElement;
         for (index = commonLength; index < arrCollection.length; index += 1) {
 
-            jqNewDynamicElement = domTemplates.jqCreateElementFromTemplate(jqTemplate, true);
+            jqNewDynamicElement =
+                domTemplates.jqCreateElementFromTemplate(
+                    virtualNodes.getOriginal(jqTemplate),
+                    true
+                );
 
             my.context.enterIteration(
                 ylcLoop.strLoopVariable,
@@ -377,11 +305,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         }
     }
 
-    function m2vProcessDynamicLoopElements(jqTemplate, strYlcLoop) {
+    function m2vProcessDynamicLoopElements(jqTemplate, ylcLoop) {
 
-        var ylcLoop = ylcLoopParser.parseYlcLoop(strYlcLoop),
-            domarrCurrentGeneratedElements =
-                getGeneratedElements(jqTemplate),
+        var domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
             arrCollection = my.context.getValue(ylcLoop.strCollectionName),
             commonLength,
             idxFirstToDelete,
@@ -429,7 +355,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
         if (ifExpressionValue && domarrCurrentGeneratedElements.length === 0) {
             jqNewDynamicElement =
-                domTemplates.jqCreateElementFromTemplate(jqTemplate, false, "_ylcId");
+                domTemplates.jqCreateElementFromTemplate(
+                    virtualNodes.getOriginal(jqTemplate),
+                    false,
+                    "_ylcId"
+                );
 
             nElementsProcessed =
                 m2vProcessElement(jqNewDynamicElement.get(), true);
@@ -461,23 +391,14 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function m2vProcessDynamicElements(jqTemplate) {
 
-        var strYlcLoop = stringUtil.strGetData(jqTemplate, "ylcLoop"),
-            strYlcIf = stringUtil.strGetData(jqTemplate, "ylcIf");
+        var metadata = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata");
 
-        if (strYlcLoop && strYlcIf) {
-            throw errorUtil.createError(
-                "An element can't contain both data-ylcLoop and data-ylcIf. " +
-                "Please use an embedded DIV.",
-                jqTemplate.get()
-            );
+        if (metadata.ylcLoop) {
+            return m2vProcessDynamicLoopElements(jqTemplate, metadata.ylcLoop);
         }
 
-        if (strYlcLoop) {
-            return m2vProcessDynamicLoopElements(jqTemplate, strYlcLoop);
-        }
-
-        if (strYlcIf) {
-            return m2vProcessDynamicIfElements(jqTemplate, strYlcIf);
+        if (metadata.ylcIf) {
+            return m2vProcessDynamicIfElements(jqTemplate, metadata.ylcIf);
         }
 
         errorUtil.assert(false);
@@ -670,7 +591,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     function createPublicContext(domElement) {
         var publicContext = {};
 
-        publicContext.PREFIELD = PREFIELD;
+        publicContext.PREFIELD = micM2v.PREFIELD;
 
         publicContext.domElement = domElement;
         publicContext.loopStatuses = my.context.getLoopStatusesSnapshot();
@@ -682,6 +603,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     }
 
     function m2vProcessElement(domElement, bBindEvents) {
+
         var nElementsProcessed;
 
         if (domTemplates.isTemplate(domElement)) {
@@ -691,11 +613,10 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             nElementsProcessed = 1;
 
         } else {
-        		m2vSetValues(domElement);
             if (bBindEvents) {
                 m2vBindEvents(domElement);
             }
-            $(domElement).removeClass("ylcInvisibleTemplate");
+            m2vSetValues(domElement);
             m2vProcessChildren(domElement, bBindEvents);
 
             nElementsProcessed = 1;
@@ -772,12 +693,45 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         );
     }
 
+    function inOrderTraversal(jqNode, listeners) {
+
+        var metadata = {},
+            bMakeVirtual = false,
+            jqVirtualNode;
+
+        $.each(
+            listeners,
+            function (idx, listener) {
+                bMakeVirtual |= listener.nodeStart(jqNode, metadata);
+            }
+        );
+
+        if (bMakeVirtual) {
+            jqVirtualNode = virtualNodes.makeVirtual(jqNode);
+        }
+
+        jqNode.children().each(
+            function() {
+                inOrderTraversal($(this), listeners);
+            }
+        );
+
+        $.each(
+            listeners,
+            function (idx, listener) {
+                listener.nodeEnd(jqNode, metadata);
+            }
+        );
+
+        jqNode.data("_ylcMetadata", metadata);
+
+        return jqVirtualNode ? jqVirtualNode : jqNode;
+
+    }
+
     function setupViewForYlcTraversal() {
 
-        $(my.domView).find(":not([data-ylcIf=''])").addClass("ylcInvisibleTemplate");
-        $(my.domView).find(":not([data-ylcLoop=''])").addClass("ylcInvisibleTemplate");
         domAnnotator.markViewRoot($(my.domView));
-
 
         if (my.controller.init instanceof Function) {
             my.controller.init.call(
@@ -797,16 +751,21 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     }
 
     my.model = pModel;
-    my.domView = pDomView;
     my.controller = pController;
 
     my.callbacks = {
         beforeEvent: [],
-        afterEvent: []
+        afterEvent: [],
+        domPreprocessors: []
     };
 
-    my.controllerMethods = extractControllerMethods(my.controller);
+    my.controllerMethods = extractControllerMethods([micProcessBindingParameters, micVirtualize, micM2v, micV2m], my.controller);
+
     my.context = contextFactory.newContext(my.model, my.controller, my.controllerMethods);
+
+    if (my.callbacks.domPreprocessors.length > 0) {
+        my.domView = inOrderTraversal(pDomView, my.callbacks.domPreprocessors);
+    }
 
     setupViewForYlcTraversal();
 
