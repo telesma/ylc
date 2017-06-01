@@ -26167,14 +26167,9 @@ module.exports = (function () {
     };
 
 }());
-},{"./errorUtil":78}],75:[function(require,module,exports){
-var jsep = require('jsep'),
-    errorUtil = require('./errorUtil'),
+},{"./errorUtil":79}],75:[function(require,module,exports){
+var errorUtil = require('./errorUtil'),
     sanityCheck = require('./sanityCheck');
-
-jsep.addBinaryOp("|||", 10);
-jsep.addBinaryOp("#", 10);
-jsep.addBinaryOp("@", 10);
 
 module.exports = {};
 
@@ -26631,8 +26626,7 @@ module.exports.newContext = function newContext(
 
     }
 
-    function gsExpressionValue(strExpression, value, forceSet) {
-        var ast = jsep(strExpression);
+    function gsExpressionValue(ast, value, forceSet) {
         return gsAstValue(ast, value, undefined, forceSet);
     }
 
@@ -26706,15 +26700,15 @@ module.exports.newContext = function newContext(
     /*
      * getValue:
      */
-    that.getValue = function (strExpression) {
-        return gsExpressionValue(strExpression);
+    that.getValue = function (ast) {
+        return gsExpressionValue(ast);
     };
 
     /*
      * setValue:
      */
-    that.setValue = function (strExpression, value, forceSet) {
-        gsExpressionValue(strExpression, value, forceSet);
+    that.setValue = function (ast, value, forceSet) {
+        gsExpressionValue(ast, value, forceSet);
     };
 
     that.getLoopStatusesSnapshot = function () {
@@ -26750,52 +26744,47 @@ module.exports.newContext = function newContext(
     return that;
 
 };
-},{"./errorUtil":78,"./sanityCheck":88,"jsep":16}],76:[function(require,module,exports){
-var virtualNodes = require('./virtualNodes');
+},{"./errorUtil":79,"./sanityCheck":94}],76:[function(require,module,exports){
+var virtualNodes = require('./virtualNodes'),
+    metadata = require('./metadata');
 
 module.exports = (function () {
 
-    var VIEW_ROOT_ATTR_NAME = "data-_ylcViewRoot",
-        VIEW_ROOT_ATTR_VALUE = "data-_ylcViewRoot",
-        TEMPLATE_IDS_CHECKED_ATTR_NAME = "data-_ylcTemplateIdsChecked",
-        TEMPLATE_IDS_CHECKED_ATTR_VALUE = "data-_ylcTemplateIdsChecked";
-
     return {
         markViewRoot: function(jqElement) {
-            virtualNodes.getOriginal(jqElement).attr(VIEW_ROOT_ATTR_NAME, VIEW_ROOT_ATTR_VALUE);
+            metadata.localOf(virtualNodes.getOriginal(jqElement)).viewRoot = true;
         },
 
         unmarkViewRoot: function(jqElement) {
-            virtualNodes.getOriginal(jqElement).removeAttr(VIEW_ROOT_ATTR_NAME);
+            metadata.localOf(virtualNodes.getOriginal(jqElement)).viewRoot = false;
         },
 
         isViewRoot: function(jqElement) {
-            return (virtualNodes.getOriginal(jqElement).attr(VIEW_ROOT_ATTR_NAME) === VIEW_ROOT_ATTR_VALUE);
+            return metadata.localOf(virtualNodes.getOriginal(jqElement)).viewRoot;
         },
 
         markTemplateIdsChecked: function(jqElement) {
-            virtualNodes.getOriginal(jqElement).attr(TEMPLATE_IDS_CHECKED_ATTR_NAME, TEMPLATE_IDS_CHECKED_ATTR_VALUE);
+            metadata.localOf(virtualNodes.getOriginal(jqElement)).templateIdsChecked = true;
         },
 
         areTemplateIdsChecked: function(jqElement) {
-            return (virtualNodes.getOriginal(jqElement).attr(TEMPLATE_IDS_CHECKED_ATTR_NAME) === TEMPLATE_IDS_CHECKED_ATTR_VALUE);
+            return metadata.localOf(virtualNodes.getOriginal(jqElement)).templateIdsChecked;
         }
 
     };
 
 }());
-},{"./virtualNodes":92}],77:[function(require,module,exports){
+},{"./metadata":82,"./virtualNodes":99}],77:[function(require,module,exports){
 var stringUtil = require("./stringUtil"),
     errorUtil = require("./errorUtil"),
     domAnnotator = require('./domAnnotator'),
-    virtualNodes = require('./virtualNodes');
+    virtualNodes = require('./virtualNodes'),
+    metadata = require('./metadata');
 
 module.exports = (function () {
 
     function isDynamicallyGenerated(domElement) {
-        var jqElement = $(domElement);
-        return jqElement.hasClass("_ylcDynamicallyGenerated") ||
-            jqElement.attr("data-_ylcDynamicallyGenerated") === "true";
+        return (!virtualNodes.isVirtual($(domElement))) && metadata.localOf($(domElement)).dynamicallyGenerated;
     }
 
     function findIncludingRoot(jqElement, selector) {
@@ -26837,7 +26826,7 @@ module.exports = (function () {
         var strYlcLoop = stringUtil.strGetData(jqElement, "ylcLoop"),
             strIf = stringUtil.strGetData(jqElement, "ylcIf");
 
-        if (!isDynamicallyGenerated(jqElement.get()) && jqElement.data("_ylcMetadata") && (jqElement.data("_ylcMetadata").ylcLoop || jqElement.data("_ylcMetadata").ylcIf)) {
+        if (!isDynamicallyGenerated(jqElement.get()) && (metadata.of(jqElement).ylcLoop || metadata.of(jqElement).astYlcIf)) {
             return true;
         }
 
@@ -26874,9 +26863,15 @@ module.exports = (function () {
                     strRewriteIdsInTemplateTo
                 );
 
-                jqClone = jqTemplate.clone(true);
-                jqClone.addClass("_ylcDynamicallyGenerated");
-                jqClone.attr("data-_ylcDynamicallyGenerated", "true");
+                jqClone = metadata.safeClone(jqTemplate);
+
+                metadata.localOf(jqClone).dynamicallyGenerated = true;
+                if (metadata.of(jqClone).bRemoveTag) {
+                    jqClone.children().each(function() {
+                        metadata.localOf($(this)).dynamicallyGenerated = true;
+                    });
+                }
+
                 domAnnotator.unmarkViewRoot(jqClone);
 
                 reintroduceIdsInClonedSubtree(jqClone, strRewriteIdsInTemplateTo);
@@ -26887,7 +26882,28 @@ module.exports = (function () {
     };
 
 }());
-},{"./domAnnotator":76,"./errorUtil":78,"./stringUtil":90,"./virtualNodes":92}],78:[function(require,module,exports){
+},{"./domAnnotator":76,"./errorUtil":79,"./metadata":82,"./stringUtil":97,"./virtualNodes":99}],78:[function(require,module,exports){
+module.exports = (function () {
+
+    function clone(domElement, fnPostprocess) {
+        var domClone = domElement.cloneNode(false),
+            idxChild;
+
+        for (idxChild = 0; idxChild < domElement.childNodes.length; idxChild += 1) {
+            domClone.appendChild(clone(domElement.childNodes[idxChild], fnPostprocess));
+        }
+
+        fnPostprocess(domElement, domClone);
+
+        return domClone;
+    }
+
+    return {
+        clone: clone
+    };
+
+}());
+},{}],79:[function(require,module,exports){
 module.exports = (function () {
 
     function createError(message, element) {
@@ -26930,19 +26946,51 @@ module.exports = (function () {
     };
 
 }());
-},{}],79:[function(require,module,exports){
-var stringUtil = require('./stringUtil');
+},{}],80:[function(require,module,exports){
+var jsep = require('jsep');
+
+jsep.addBinaryOp("|||", 10);
+jsep.addBinaryOp("#", 10);
+jsep.addBinaryOp("@", 10);
+
+module.exports = {
+
+    toAst: function(strExpression) {
+        return jsep(strExpression);
+    }
+
+};
+},{"jsep":16}],81:[function(require,module,exports){
+var stringUtil = require("./stringUtil"),
+    stringBuilderFactory = require("./stringBuilderFactory");
+
+function newMatchResult(matchedLength, fnCallback) {
+    return {
+        matchedLength: matchedLength,
+        fnCallback: fnCallback
+    };
+}
 
 module.exports = (function () {
 
     return {
 
-        process: function(string, arrTokenRecognizers) {
+        process: function(string, arrTokenRecognizers, fnUnmatchedCallback) {
             var idxString = 0,
-                nMatchedCharacters,
+                matchResult,
                 idxTokenRecognizer,
                 fnTokenRecognizer,
-                bMatched;
+                bMatched,
+                sbUnmatched = stringBuilderFactory.newStringBuilder();
+
+            function drainUnmatched() {
+                if (sbUnmatched.isNotEmpty()) {
+                    if (fnUnmatchedCallback) {
+                        fnUnmatchedCallback(sbUnmatched.build());
+                        sbUnmatched = stringBuilderFactory.newStringBuilder();
+                    }
+                }
+            }
 
             while (idxString < string.length) {
                 bMatched = false;
@@ -26951,43 +26999,48 @@ module.exports = (function () {
                         idxTokenRecognizer < arrTokenRecognizers.length;
                         idxTokenRecognizer += 1) {
                     fnTokenRecognizer = arrTokenRecognizers[idxTokenRecognizer];
-                    nMatchedCharacters = fnTokenRecognizer(string, idxString);
-                    if (nMatchedCharacters > 0) {
-                        idxString += nMatchedCharacters;
+
+                    matchResult = fnTokenRecognizer(string, idxString);
+
+                    if (matchResult.matchedLength > 0) {
+
+                        drainUnmatched();
+
+                        if (matchResult.fnCallback) {
+                            matchResult.fnCallback(string.substr(idxString, matchResult.matchedLength));
+                        }
+                        idxString += matchResult.matchedLength;
                         bMatched = true;
                         break;
                     }
                 }
 
                 if (!bMatched) {
-                    throw "Unrecognized token in '" + string + "' at position " + idxString + ".";
+                    if (fnUnmatchedCallback) {
+                        sbUnmatched.append(string.substr(idxString, 1));
+                        idxString += 1;
+                    } else {
+                        throw "Unrecognized token in '" + string + "' at position " + idxString + ".";
+                    }
                 }
             }
+
+            drainUnmatched();
 
         },
 
         onDefaultToken: function(callback) {
             return function(string, idxString) {
-                if (callback) {
-                    callback(string.substr(idxString, 1));
-                }
-
-                return 1;
+                return newMatchResult(1, callback);
             }
         },
 
         onConstantToken: function(token, callback) {
             return function(string, idxString) {
-
-                if (!stringUtil.hasSubstringAt(string, token, idxString)) {
-                    return 0;
-                }
-
-                if (callback) {
-                    callback(token);
-                }
-
-                return token.length;
+                return newMatchResult(
+                    stringUtil.hasSubstringAt(string, token, idxString) ? token.length : 0,
+                    callback
+                );
             };
         },
 
@@ -26996,28 +27049,23 @@ module.exports = (function () {
 
                 var idxOpening,
                     idxClosing,
-                    lenToken,
-                    strToken;
+                    lenToken;
 
                 if (!stringUtil.hasSubstringAt(string, opening, idxString)) {
-                    return 0;
+                    return newMatchResult(0, null);
                 }
 
                 idxOpening = idxString;
                 idxClosing = string.indexOf(closing, idxOpening + opening.length);
 
                 if (idxClosing === -1) {
-                    return 0;
+                    return newMatchResult(0, null);
                 }
 
                 lenToken = (idxClosing - idxOpening) + closing.length;
-                strToken = string.substr(idxString, lenToken);
 
-                if (callback) {
-                    callback(strToken);
-                }
+                return newMatchResult(lenToken, callback);
 
-                return lenToken;
             }
         },
 
@@ -27034,19 +27082,79 @@ module.exports = (function () {
 
                 strToken = string.substr(idxStringOriginal, idxStringCurrent - idxStringOriginal);
 
-                if (idxStringCurrent > idxStringOriginal && callback) {
-                    callback(strToken);
-                }
-
-                return strToken.length;
-
+                return newMatchResult(strToken.length, callback);
             }
         }
 
     };
 
 }());
-},{"./stringUtil":90}],80:[function(require,module,exports){
+},{"./stringBuilderFactory":96,"./stringUtil":97}],82:[function(require,module,exports){
+var domUtil = require("./domUtil");
+
+module.exports = (function () {
+
+    var SHARED_METADATA_KEY = "_ylcMetadata",
+        LOCAL_METADATA_KEY = "_ylcNodeSpecificMetadata";
+
+    return {
+
+        of: function(jqElement) {
+            if (!jqElement.data(SHARED_METADATA_KEY)) {
+                jqElement.data(SHARED_METADATA_KEY, {});
+            }
+
+            return jqElement.data(SHARED_METADATA_KEY);
+        },
+
+        localOf: function(jqElement) {
+            if (!jqElement.data(LOCAL_METADATA_KEY)) {
+                jqElement.data(LOCAL_METADATA_KEY, {});
+            }
+
+            return jqElement.data(LOCAL_METADATA_KEY);
+        },
+
+        safeElementReplace: function(jqOriginal, jqNew) {
+            var metadata = jqOriginal.data(SHARED_METADATA_KEY);
+
+            jqOriginal.replaceWith(jqNew);
+            if (metadata) {
+                jqOriginal.data(SHARED_METADATA_KEY, metadata);
+            }
+
+            return jqOriginal;
+        },
+
+        safeClone: function(jqTemplate) {
+
+            var domClone =
+                domUtil.clone(
+                    jqTemplate.get(0),
+                    function(domOriginal, domClone) {
+
+                        $(domClone).data(
+                            SHARED_METADATA_KEY,
+                            $(domOriginal).data(SHARED_METADATA_KEY)
+                        );
+
+                        if ($(domOriginal).data(LOCAL_METADATA_KEY)) {
+                            $(domClone).data(
+                                LOCAL_METADATA_KEY,
+                                $.extend(true, {}, $(domOriginal).data(LOCAL_METADATA_KEY))
+                            );
+                        }
+                    }
+                );
+
+            return $(domClone);
+
+        }
+
+    };
+
+}());
+},{"./domUtil":78}],83:[function(require,module,exports){
 var domTemplates = require("../domTemplates"),
     stringUtil = require("../stringUtil"),
     ylcBindParser = require("../parser/ylcBind"),
@@ -27073,7 +27181,7 @@ function createM2v(currentYlcBinding) {
         }
 
         try {
-            value = context.getValue(currentYlcBinding.strBindingExpression);
+            value = context.getValue(currentYlcBinding.astBindingExpression);
 
         } catch (err) {
             throw errorUtil.elementToError(err, domElement);
@@ -27117,7 +27225,8 @@ module.exports = {
 
                 var arrYlcBind = metadata.ylcBind,
                     idxYlcBind,
-                    currentYlcBinding;
+                    currentYlcBinding,
+                    bHasM2v = false;
 
                 for (idxYlcBind = 0; idxYlcBind < arrYlcBind.length; idxYlcBind += 1) {
                     currentYlcBinding = arrYlcBind[idxYlcBind];
@@ -27132,13 +27241,17 @@ module.exports = {
                         continue;
                     }
 
-                    metadata.m2v.push(
-                        createM2v(currentYlcBinding)
-                    );
+                    metadata.m2v.push(createM2v(currentYlcBinding));
+                    bHasM2v = true;
 
                 }
 
-                return false;
+                return {
+                    bMakeVirtual: false,
+                    bHasV2m: false,
+                    bHasM2v: bHasM2v
+                };
+
             },
 
             nodeEnd: function() {
@@ -27150,7 +27263,7 @@ module.exports = {
     PREFIELD: PREFIELD
 
 };
-},{"../domTemplates":77,"../errorUtil":78,"../parser/ylcBind":85,"../stringUtil":90,"../virtualNodes":92}],81:[function(require,module,exports){
+},{"../domTemplates":77,"../errorUtil":79,"../parser/ylcBind":91,"../stringUtil":97,"../virtualNodes":99}],84:[function(require,module,exports){
 var domTemplates = require("../domTemplates"),
     stringUtil = require("../stringUtil"),
     ylcBindParser = require("../parser/ylcBind"),
@@ -27163,8 +27276,9 @@ module.exports = {
 
         return {
             nodeStart: function(jqNode, metadata) {
+                metadata.ylcBind = metadata.ylcBind || [];
                 var strYlcBind = stringUtil.strGetData(jqNode, "ylcBind");
-                metadata.ylcBind = ylcBindParser.parseYlcBind(strYlcBind);
+                metadata.ylcBind = metadata.ylcBind.concat(ylcBindParser.parseYlcBind(strYlcBind));
                 jqNode.removeAttr("data-ylcBind");
                 return false;
             },
@@ -27176,7 +27290,166 @@ module.exports = {
     }
 
 };
-},{"../domTemplates":77,"../errorUtil":78,"../parser/ylcBind":85,"../stringUtil":90,"../virtualNodes":92}],82:[function(require,module,exports){
+},{"../domTemplates":77,"../errorUtil":79,"../parser/ylcBind":91,"../stringUtil":97,"../virtualNodes":99}],85:[function(require,module,exports){
+var stringUtil = require("../stringUtil"),
+    ylcEventsParser = require("../parser/ylcEvents");
+
+module.exports = {
+
+    "@DomPreprocessorFactory": function() {
+
+        return {
+            nodeStart: function(jqNode, metadata) {
+
+                var strYlcEvents,
+                    arrYlcEvents;
+
+                metadata.listeners =
+                    metadata.listeners || {
+                        ylcLifecycle: {},
+                        jsEvents: {}
+                    };
+
+                strYlcEvents = stringUtil.strGetData(jqNode, "ylcEvents");
+                arrYlcEvents = ylcEventsParser.parseYlcEvents(strYlcEvents);
+
+                $.each(
+                    arrYlcEvents,
+                    function(idx, ylcEvent) {
+
+                        if (ylcEvent.strEventName === "ylcElementInitialized") {
+                            metadata.listeners.ylcLifecycle.elementInitialized =
+                                {
+                                    strMethodName: ylcEvent.strMethodName,
+                                    arrArgumentsAsts: ylcEvent.arrArgumentAsts
+                                };
+
+                        } else {
+                            metadata.listeners.jsEvents[ylcEvent.strEventName] =
+                                {
+                                    strMethodName: ylcEvent.strMethodName,
+                                    arrArgumentsAsts: ylcEvent.arrArgumentAsts
+                                };
+                        }
+
+                    }
+                );
+
+                jqNode.removeAttr("data-ylcEvents");
+
+                var ylcElementInit = stringUtil.strGetData(jqNode, "ylcElementInit");
+                if (ylcElementInit) {
+                    var objHandlerCall = ylcEventsParser.parseEventHandlerCall(ylcElementInit);
+                    metadata.listeners.ylcLifecycle.elementInitialized =
+                        {
+                            strMethodName: objHandlerCall.strMethodName,
+                            arrArgumentsAsts: objHandlerCall.arrArgumentAsts
+                        };
+                }
+                jqNode.removeAttr("data-ylcElementInit");
+
+                return false;
+            },
+
+            nodeEnd: function() {
+                return false;
+            }
+        };
+    }
+
+};
+},{"../parser/ylcEvents":92,"../stringUtil":97}],86:[function(require,module,exports){
+var domTemplates = require("../domTemplates"),
+    stringUtil = require("../stringUtil"),
+    ylcBindParser = require("../parser/ylcBind"),
+    errorUtil = require("../errorUtil"),
+    virtualNodes = require("../virtualNodes"),
+    moustache = require("../parser/moustache");
+
+function pushBinding(metadata, strPropertyName, strSubpropertyName, strExpression) {
+    metadata.ylcBind.push(
+        {
+            strMappingOperator: ylcBindParser.MAPPING_BIDIRECTIONAL,
+            strPropertyName: strPropertyName,
+            strSubpropertyName: strSubpropertyName,
+            astBindingExpression: moustache.parse(strExpression)
+        }
+    );
+}
+
+function getElementText(jqElement) {
+
+    var jqElementContents = jqElement.contents(),
+        jqTextElementsWithMoustache =
+            jqElementContents.filter(function() {
+                return this.nodeType == 3 && moustache.containsMoustache(this.nodeValue);
+            });
+
+    if (jqTextElementsWithMoustache.length === 0) {
+        return;
+    }
+
+    if (jqElementContents.length > 1) {
+        throw errorUtil.createError(
+            "Elements containing {{...}} cannot be a part of mixed content. " +
+                "Please wrap the chunk of text containing {{...}} into its own " +
+                "element (e.g. <span>, <p>, <g>, etc.)",
+            jqElement.get(0)
+        );
+    }
+
+    return jqTextElementsWithMoustache[0].nodeValue;
+}
+
+module.exports = {
+
+    "@DomPreprocessorFactory": function() {
+
+        return {
+            nodeStart: function(jqNode, metadata) {
+
+                metadata.ylcBind = metadata.ylcBind || [];
+
+                var arrAttributes = jqNode.get(0).attributes,
+                    idxAttribute,
+                    elementText,
+                    bHasM2v = false;
+                
+                for (idxAttribute = 0; idxAttribute < arrAttributes.length; idxAttribute += 1) {
+                    if (moustache.containsMoustache(arrAttributes[idxAttribute].value)) {
+                        pushBinding(
+                            metadata,
+                            "attr",
+                            arrAttributes[idxAttribute].name,
+                            arrAttributes[idxAttribute].value
+                        );
+                        bHasM2v = true;
+                    }
+                }
+
+                elementText = getElementText(jqNode);
+
+                if (elementText) {
+                    pushBinding(metadata, "text", undefined, elementText);
+                    bHasM2v = true;
+                }
+
+                return {
+                    bMakeVirtual: false,
+                    bHasV2m: false,
+                    bHasM2v: bHasM2v
+                };
+
+            },
+
+            nodeEnd: function() {
+                return false;
+            }
+        };
+    }
+
+};
+},{"../domTemplates":77,"../errorUtil":79,"../parser/moustache":90,"../parser/ylcBind":91,"../stringUtil":97,"../virtualNodes":99}],87:[function(require,module,exports){
 var domTemplates = require("../domTemplates"),
     stringUtil = require("../stringUtil"),
     ylcBindParser = require("../parser/ylcBind"),
@@ -27215,7 +27488,7 @@ function createV2m(currentYlcBinding) {
         }
 
         try {
-            context.setValue(currentYlcBinding.strBindingExpression, value, forceSet);
+            context.setValue(currentYlcBinding.astBindingExpression, value, forceSet);
 
         } catch (err) {
             throw errorUtil.elementToError(err, domElement);
@@ -27235,7 +27508,8 @@ module.exports = {
 
                 var arrYlcBind = metadata.ylcBind,
                     idxYlcBind,
-                    currentYlcBinding;
+                    currentYlcBinding,
+                    bHasV2m = false;
 
                 for (idxYlcBind = 0; idxYlcBind < arrYlcBind.length; idxYlcBind += 1) {
                     currentYlcBinding = arrYlcBind[idxYlcBind];
@@ -27246,12 +27520,17 @@ module.exports = {
                         continue;
                     }
 
-                    metadata.v2m.push(
-                        createV2m(currentYlcBinding)
-                    );
+                    metadata.v2m.push(createV2m(currentYlcBinding));
+                    bHasV2m = true;
+
                 }
 
-                return false;
+                return {
+                    bMakeVirtual: false,
+                    bHasV2m: bHasV2m,
+                    bHasM2v: false
+                };
+
             },
 
             nodeEnd: function() {
@@ -27261,12 +27540,13 @@ module.exports = {
     }
 
 };
-},{"../domTemplates":77,"../errorUtil":78,"../parser/ylcBind":85,"../stringUtil":90,"../virtualNodes":92}],83:[function(require,module,exports){
+},{"../domTemplates":77,"../errorUtil":79,"../parser/ylcBind":91,"../stringUtil":97,"../virtualNodes":99}],88:[function(require,module,exports){
 var errorUtil = require('../errorUtil'),
     parseUtil = require('../parseUtil'),
     domTemplates = require("../domTemplates"),
     ylcLoopParser = require('../parser/ylcLoop'),
-    stringUtil = require("../stringUtil");
+    stringUtil = require("../stringUtil"),
+    expressionParser = require('../expressionParser');
 
 module.exports = {
 
@@ -27275,7 +27555,8 @@ module.exports = {
             nodeStart: function(jqNode, metadata) {
 
                 var strYlcLoop = stringUtil.strGetData(jqNode, "ylcLoop"),
-                    strYlcIf = stringUtil.strGetData(jqNode, "ylcIf");
+                    strYlcIf = stringUtil.strGetData(jqNode, "ylcIf"),
+                    bRemoveTag = (stringUtil.strGetData(jqNode, "ylcRemoveTag") !== undefined);
 
                 if (strYlcLoop && strYlcIf) {
                     throw errorUtil.createError(
@@ -27289,16 +27570,30 @@ module.exports = {
                     metadata.ylcLoop = ylcLoopParser.parseYlcLoop(strYlcLoop);
 
                 } else if (strYlcIf) {
-                    metadata.ylcIf = parseUtil.normalizeWhitespace(strYlcIf);
+                    metadata.astYlcIf = expressionParser.toAst(parseUtil.normalizeWhitespace(strYlcIf));
 
                 } else {
+                    if (bRemoveTag) {
+                        throw errorUtil.createError(
+                            "The data-ylcRemoveTag attribute can only be used in conjunction with data-ylcIf and " +
+                            "data-ylcLoop attributes.",
+                            jqNode
+                        );
+                    }
+                    
                     return false;
                 }
 
+                metadata.bRemoveTag = bRemoveTag;
+                
                 jqNode.removeAttr("data-ylcLoop");
                 jqNode.removeAttr("data-ylcIf");
 
-                return true;
+                return {
+                    bMakeVirtual: true,
+                    bHasV2m: false,
+                    bHasM2v: true
+                };
 
             },
 
@@ -27309,7 +27604,7 @@ module.exports = {
     }
 
 };
-},{"../domTemplates":77,"../errorUtil":78,"../parseUtil":84,"../parser/ylcLoop":87,"../stringUtil":90}],84:[function(require,module,exports){
+},{"../domTemplates":77,"../errorUtil":79,"../expressionParser":80,"../parseUtil":89,"../parser/ylcLoop":93,"../stringUtil":97}],89:[function(require,module,exports){
 var stringArrayBuilderFactory = require('./stringArrayBuilderFactory'),
     lexer = require('./lexer');
 
@@ -27414,9 +27709,121 @@ module.exports = (function () {
     };
 
 }());
-},{"./lexer":79,"./stringArrayBuilderFactory":89}],85:[function(require,module,exports){
+},{"./lexer":81,"./stringArrayBuilderFactory":95}],90:[function(require,module,exports){
+var lexer = require("../lexer"),
+    parseUtil = require("../parseUtil"),
+    jsep = require("jsep"),
+
+    LEFT_MOUSTACHE_DELIMITER = "{{",
+    RIGHT_MOUSTACHE_DELIMITER = "}}",
+    LEFT_TR_MOUSTACHE_DELIMITER = "@{{",
+    RIGHT_TR_MOUSTACHE_DELIMITER = "}}";
+
+function containsDelimited(strToTest, strOpening, strClosing) {
+    var idxOpening = strToTest.indexOf(strOpening),
+        idxClosing = strToTest.indexOf(strClosing);
+
+    return idxOpening !== -1 && idxClosing !== -1 && (idxClosing - idxOpening >= strOpening.length);
+}
+
+function stringToAst(str) {
+    return jsep("'" + str + "'");
+}
+
+function addAstToAst(astLeft, astRight) {
+
+    if (!astLeft) {
+        return astRight;
+    }
+
+    return {
+        type: "BinaryExpression",
+        operator: "+",
+        left: astLeft,
+        right: astRight
+    };
+
+}
+
+function addStringToAst(astLeft, strRight) {
+
+    if (!astLeft) {
+        return stringToAst(strRight);
+    }
+
+    return addAstToAst(astLeft, stringToAst(strRight));
+}
+
+function createTrAst(strTrExpression) {
+    var arrParts = parseUtil.split(strTrExpression, ","),
+        strKey = arrParts[0],
+        arrArguments = arrParts.slice(1),
+        astResult;
+
+    if (arrArguments.length === 0) {
+        astResult = jsep("translate('" + strKey + "')");
+    } else {
+        astResult = jsep("translate('" + strKey + "', " + arrArguments.join(", ") + ")");
+    }
+
+    return astResult;
+
+}
+
+module.exports = {
+
+    containsMoustache: function(strToTest) {
+        return containsDelimited(strToTest, LEFT_MOUSTACHE_DELIMITER, RIGHT_MOUSTACHE_DELIMITER) ||
+               containsDelimited(strToTest, LEFT_TR_MOUSTACHE_DELIMITER, RIGHT_TR_MOUSTACHE_DELIMITER);
+    },
+
+    parse: function(strExpressionWithMoustache) {
+
+        var astResult = null;
+
+        lexer.process(
+            strExpressionWithMoustache,
+            [
+                lexer.onDelimitedToken(
+                    LEFT_MOUSTACHE_DELIMITER,
+                    RIGHT_MOUSTACHE_DELIMITER,
+                    function(strToken) {
+                        var strExpression =
+                                strToken.substring(
+                                    LEFT_MOUSTACHE_DELIMITER.length,
+                                    strToken.length - RIGHT_MOUSTACHE_DELIMITER.length
+                                );
+                        astResult = addAstToAst(astResult, jsep(strExpression));
+                    }
+                ),
+
+                lexer.onDelimitedToken(
+                    LEFT_TR_MOUSTACHE_DELIMITER,
+                    RIGHT_TR_MOUSTACHE_DELIMITER,
+                    function(strToken) {
+                        var strTrExpression =
+                            strToken.substring(
+                                LEFT_TR_MOUSTACHE_DELIMITER.length,
+                                strToken.length - RIGHT_TR_MOUSTACHE_DELIMITER.length
+                            );
+                        astResult = addAstToAst(astResult, createTrAst(strTrExpression));
+                    }
+                )
+            ],
+            function (strUnmatchedToken) {
+                astResult = addStringToAst(astResult, strUnmatchedToken);
+            }
+        );
+
+        return astResult;
+
+    }
+
+};
+},{"../lexer":81,"../parseUtil":89,"jsep":16}],91:[function(require,module,exports){
 var parseUtil = require("../parseUtil"),
-    errorUtil = require('../errorUtil');
+    errorUtil = require('../errorUtil'),
+    expressionParser = require('../expressionParser');
 
 module.exports = (function () {
 
@@ -27490,7 +27897,9 @@ module.exports = (function () {
             sbExpression = [],
             strPropertyAndSubproperty,
             strPropertyName,
-            strSubpropertyName;
+            strSubpropertyName,
+            strBindingExpression,
+            astBindingExpression;
 
         index = readPropertyAndSubproperty(strBinding, index, sbPropertyAndSubproperty);
         strMappingOperator = pokeMappingOperator(strBinding, index);
@@ -27508,11 +27917,24 @@ module.exports = (function () {
             strSubpropertyName = $.trim(strPropertyAndSubproperty.split(".")[1]);
         }
 
+        strBindingExpression = $.trim(sbExpression.join(""));
+
+        try {
+            astBindingExpression = expressionParser.toAst(strBindingExpression);
+        } catch (parseException) {
+            throw errorUtil.createError(
+                "Invalid binding expression for binding '" + strPropertyAndSubproperty + "' - " +
+                parseException + ": " +
+                strBinding
+            );
+        }
+
         return {
             strPropertyName: strPropertyName,
             strSubpropertyName: strSubpropertyName,
             strMappingOperator: strMappingOperator,
-            strBindingExpression: $.trim(sbExpression.join(""))
+            strBindingExpression: strBindingExpression,
+            astBindingExpression: astBindingExpression
         };
     }
 
@@ -27550,10 +27972,67 @@ module.exports = (function () {
     };
 
 }());
-},{"../errorUtil":78,"../parseUtil":84}],86:[function(require,module,exports){
+},{"../errorUtil":79,"../expressionParser":80,"../parseUtil":89}],92:[function(require,module,exports){
 var stringUtil = require("../stringUtil"),
     errorUtil = require('../errorUtil'),
-    parseUtil = require('../parseUtil');
+    parseUtil = require('../parseUtil'),
+    expressionParser = require('../expressionParser');
+
+function argumentsExpressionToAsts(arrArgumentExpressions) {
+
+    if (arrArgumentExpressions === null || arrArgumentExpressions === undefined) {
+        return arrArgumentExpressions;
+    }
+
+    return $.map(
+        arrArgumentExpressions,
+        expressionParser.toAst
+    );
+
+}
+
+function parseEventHandlerCall(strHandler) {
+
+    var idxArgumentListStart,
+        arrArgumentExpressions,
+        strMethodName,
+        strArgumentList;
+
+    idxArgumentListStart = strHandler.indexOf("(");
+    if (idxArgumentListStart === -1) {
+        strMethodName = $.trim(strHandler);
+        arrArgumentExpressions = [];
+
+    } else {
+
+        if (strHandler.charAt(strHandler.length - 1) !== ')') {
+            throw errorUtil.createError(
+                "Invalid format of the data-ylcEvents parameter: " + strHandler
+            );
+        }
+
+        strMethodName = $.trim(strHandler.substr(0, idxArgumentListStart));
+        strArgumentList =
+            $.trim(
+                strHandler.substr(
+                    idxArgumentListStart + 1,
+                    strHandler.length - idxArgumentListStart - 2
+                )
+            );
+
+        if (strArgumentList.length === 0) {
+            arrArgumentExpressions = [];
+        } else {
+            arrArgumentExpressions = parseUtil.split(strArgumentList, ",");
+        }
+    }
+
+    return {
+        strMethodName: strMethodName,
+        arrArgumentAsts: argumentsExpressionToAsts(arrArgumentExpressions)
+    };
+
+}
 
 module.exports = (function () {
 
@@ -27567,17 +28046,12 @@ module.exports = (function () {
             var result = [],
                 arrEvents = parseUtil.normalizeWhitespace(strYlcEvents).split(";"),
                 index,
-
                 strEvent,
-                arrParts,
                 strEventName,
                 strHandler,
-                idxArgumentListStart,
-                strArgumentList,
-                arrArgumentExpressions,
                 strMethodName,
-
-                idxEventNameHandlerSeparator;
+                idxEventNameHandlerSeparator,
+                objHandlerCall;
 
             for (index = 0; index < arrEvents.length; index += 1) {
                 strEvent = $.trim(arrEvents[index]);
@@ -27600,53 +28074,29 @@ module.exports = (function () {
                             )
                         );
 
-                    idxArgumentListStart = strHandler.indexOf("(");
-                    if (idxArgumentListStart === -1) {
-                        strMethodName = $.trim(strHandler);
-                        arrArgumentExpressions = [];
-
-                    } else {
-
-                        if (strHandler.charAt(strHandler.length - 1) !== ')') {
-                            throw errorUtil.createError(
-                                "Invalid format of the data-ylcEvents parameter: " + strYlcEvents
-                            );
-                        }
-
-                        strMethodName = $.trim(strHandler.substr(0, idxArgumentListStart));
-                        strArgumentList =
-                            $.trim(
-                                strHandler.substr(
-                                    idxArgumentListStart + 1,
-                                    strHandler.length - idxArgumentListStart - 2
-                                )
-                            );
-
-                        if (strArgumentList.length === 0) {
-                            arrArgumentExpressions = [];
-                        } else {
-                            arrArgumentExpressions = parseUtil.split(strArgumentList, ",");
-                        }
-                    }
+                    objHandlerCall = parseEventHandlerCall(strHandler);
 
                     result.push({
                         strEventName: strEventName,
-                        strMethodName: strMethodName,
-                        arrArgumentExpressions: arrArgumentExpressions
+                        strMethodName: objHandlerCall.strMethodName,
+                        arrArgumentAsts: objHandlerCall.arrArgumentAsts
                     });
 
                 }
             }
 
             return result;
-        }
+        },
+
+        parseEventHandlerCall: parseEventHandlerCall
 
     };
 
 }());
-},{"../errorUtil":78,"../parseUtil":84,"../stringUtil":90}],87:[function(require,module,exports){
+},{"../errorUtil":79,"../expressionParser":80,"../parseUtil":89,"../stringUtil":97}],93:[function(require,module,exports){
 var parseUtil = require("../parseUtil"),
-    errorUtil = require('../errorUtil');
+    errorUtil = require('../errorUtil'),
+    expressionParser = require('../expressionParser');
 
 module.exports = (function () {
 
@@ -27660,7 +28110,7 @@ module.exports = (function () {
                 },
                 arrParts = parseUtil.normalizeWhitespace(strYlcLoop).split(":"),
                 strLoopAndStatusVariables,
-                strCollectionName,
+                strCollection,
                 strLoopVariable,
                 strStatusVariable,
                 arrLoopAndStatusParts;
@@ -27670,9 +28120,9 @@ module.exports = (function () {
             }
 
             strLoopAndStatusVariables = $.trim(arrParts[0]);
-            strCollectionName = $.trim(arrParts[1]);
+            strCollection = $.trim(arrParts[1]);
 
-            if (!strLoopAndStatusVariables || !strCollectionName) {
+            if (!strLoopAndStatusVariables || !strCollection) {
                 throwException();
             }
 
@@ -27691,14 +28141,14 @@ module.exports = (function () {
             return {
                 strLoopVariable: strLoopVariable,
                 strStatusVariable: strStatusVariable,
-                strCollectionName: strCollectionName
+                astCollection: expressionParser.toAst(strCollection)
             };
         }
 
     };
 
 }());
-},{"../errorUtil":78,"../parseUtil":84}],88:[function(require,module,exports){
+},{"../errorUtil":79,"../expressionParser":80,"../parseUtil":89}],94:[function(require,module,exports){
 var errorUtil = require('./errorUtil');
 
 module.exports = (function () {
@@ -27720,7 +28170,7 @@ module.exports = (function () {
     };
 
 }());
-},{"./errorUtil":78}],89:[function(require,module,exports){
+},{"./errorUtil":79}],95:[function(require,module,exports){
 var stringUtil = require('./stringUtil');
 
 module.exports = (function () {
@@ -27755,7 +28205,33 @@ module.exports = (function () {
     };
 
 }());
-},{"./stringUtil":90}],90:[function(require,module,exports){
+},{"./stringUtil":97}],96:[function(require,module,exports){
+module.exports = {
+
+    newStringBuilder: function() {
+
+        var sb = [];
+
+        return {
+
+            append: function(strToAppend) {
+                sb.push(strToAppend);
+            },
+
+            isNotEmpty: function() {
+                return sb.length > 0;
+            },
+
+            build: function() {
+                return sb.join("");
+            }
+
+        };
+
+    }
+
+};
+},{}],97:[function(require,module,exports){
 module.exports = (function () {
 
     function hasSubstringAt(string, substring, index) {
@@ -27779,26 +28255,27 @@ module.exports = (function () {
     };
 
 }());
-},{}],91:[function(require,module,exports){
+},{}],98:[function(require,module,exports){
 var errorUtil = require('./errorUtil'),
     stringUtil = require('./stringUtil'),
     parseUtil = require('./parseUtil'),
-    ylcBindParser = require('./parser/ylcBind'),
     domTemplates = require('./domTemplates'),
-    ylcEventsParser = require('./parser/ylcEvents'),
-    ylcLoopParser = require('./parser/ylcLoop'),
     domAnnotator = require('./domAnnotator'),
     contextFactory = require('./contextFactory'),
     annotationProcessor = require('./annotationProcessor'),
     virtualNodes = require('./virtualNodes'),
-    micVirtualize = require('./mic/virtualizeTemplates'),
-    micProcessBindingParameters = require('./mic/processBindingParameters'),
-    micM2v = require('./mic/m2v'),
-    micV2m = require('./mic/v2m');
+    micVirtualize = require('./mixin/virtualizeTemplates'),
+    micProcessBindingParameters = require('./mixin/processBindingParameters'),
+    processEventParameters = require('./mixin/processEventParameters'),
+    micM2v = require('./mixin/m2v'),
+    micV2m = require('./mixin/v2m'),
+    processMoustacheBindings = require('./mixin/processMoustacheBindings'),
+    metadata = require('./metadata'),
+    expressionParser = require('./expressionParser');
 
 module.exports = {};
 
-module.exports.setupTraversal = function(pModel, pDomView, pController) {
+module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins) {
 
     var EMPTY_FUNCTION = function () {},
         my = {};
@@ -27806,6 +28283,12 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     function m2vOnlyAnnotationListener(annotation, code, metadata) {
         if (annotation === "@M2vOnly") {
             metadata.m2vOnly = true;
+        }
+    }
+
+    function publicAnnotationListener(annotation, code, metadata) {
+        if (annotation === "@Public") {
+            metadata.public = true;
         }
     }
 
@@ -27818,6 +28301,12 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         }
     }
 
+    function initAnnotationListener(annotation, code, metadata) {
+        if (annotation === "@Init") {
+            my.callbacks.init.push(code);
+        }
+    }
+
     function domPreprocessAnnotationListener(annotation, code, metadata) {
         if (annotation === "@DomPreprocessorFactory") {
             my.callbacks.domPreprocessors.push(code());
@@ -27826,37 +28315,47 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function extractControllerMethods(mixins, controller) {
 
+        var methodsForMixin,
+            result = {},
+            annotationListeners =
+                [
+                    publicAnnotationListener,
+                    m2vOnlyAnnotationListener,
+                    initAnnotationListener,
+                    beforeAfterEventAnnotationListener,
+                    domPreprocessAnnotationListener
+                ];
+
         $.each(
             mixins,
             function(idx, mixin) {
-                annotationProcessor.processAnnotations(
-                    mixin,
-                    [
-                        m2vOnlyAnnotationListener,
-                        beforeAfterEventAnnotationListener,
-                        domPreprocessAnnotationListener
-                    ]
-                );
+                methodsForMixin =
+                    annotationProcessor.processAnnotations(
+                        mixin,
+                        annotationListeners
+                    );
+                $.extend(result, methodsForMixin);
             }
         );
 
-        return annotationProcessor.processAnnotations(
-            controller,
-            [
-                m2vOnlyAnnotationListener,
-                beforeAfterEventAnnotationListener,
-                domPreprocessAnnotationListener
-            ]
-        );
+        methodsForMixin =
+            annotationProcessor.processAnnotations(
+                controller,
+                annotationListeners
+            );
+        $.extend(result, methodsForMixin);
+
+        return result;
     }
 
     function v2mSetValues(domElement) {
 
-        var jqElement = $(domElement);
+        var jqElement = $(domElement),
+            v2m = metadata.of(jqElement).v2m;
 
-        if (jqElement.data("_ylcMetadata")) {
+        if (v2m) {
             $.each(
-                jqElement.data("_ylcMetadata").v2m,
+                v2m,
                 function (idx, v2m) {
                     v2m(domElement, my.context);
                 }
@@ -27874,11 +28373,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         while (true) {
             jqCurrentSibling = jqCurrentSibling.next();
 
-            if (jqCurrentSibling.get() === undefined || !domTemplates.isDynamicallyGenerated(jqCurrentSibling)) {
+            if (jqCurrentSibling.length === 0 || !domTemplates.isDynamicallyGenerated(jqCurrentSibling.get(0))) {
                 break;
             }
 
-            domarrResult.push(jqCurrentSibling.get());
+            domarrResult.push(jqCurrentSibling.get(0));
         }
 
         return domarrResult;
@@ -27895,13 +28394,13 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function v2mProcessDynamicElements(jqTemplate) {
 
-        var metadata = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata");
+        var metadataObj = metadata.of(virtualNodes.getOriginal(jqTemplate));
 
-        if (metadata.ylcLoop) {
+        if (metadataObj.ylcLoop) {
             return v2mProcessDynamicLoopElements(jqTemplate);
         }
 
-        if (metadata.ylcIf) {
+        if (metadataObj.astYlcIf) {
             return v2mProcessDynamicIfElements(jqTemplate);
         }
 
@@ -27914,6 +28413,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
         if (domTemplates.isTemplate(domElement)) {
             nElementsProcessed = v2mProcessDynamicElements($(domElement), my.controller);
+
+        } else if (metadata.of($(domElement)).bHasV2m === 0) {
+            nElementsProcessed = 1;
 
         } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
             nElementsProcessed = 1;
@@ -27930,12 +28432,19 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     function v2mProcessDynamicLoopElements(jqTemplate) {
 
         var idxWithinDynamicallyGenerated,
-            ylcLoop = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata").ylcLoop,
-            arrCollection = my.context.getValue(ylcLoop.strCollectionName),
+            ylcLoop,
+            arrCollection,
             domarrGeneratedElements = getGeneratedElements(jqTemplate),
             domDynamicallyGeneratedElement,
+            dynamicElementsPerArrayItem = getDynamicElementsPerArrayItem(jqTemplate),
             nProcessed;
 
+        if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bHasV2m === 0) {
+            return domarrGeneratedElements.length + 1;
+        }
+
+        ylcLoop = metadata.of(virtualNodes.getOriginal(jqTemplate)).ylcLoop;
+        arrCollection = my.context.getValue(ylcLoop.astCollection);
         checkIterable(arrCollection);
 
         for (idxWithinDynamicallyGenerated = 0;
@@ -27949,7 +28458,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                 ylcLoop.strLoopVariable,
                 arrCollection,
                 ylcLoop.strStatusVariable,
-                idxWithinDynamicallyGenerated
+                Math.floor(idxWithinDynamicallyGenerated / dynamicElementsPerArrayItem)
             );
 
             nProcessed = v2mProcessElement(domDynamicallyGeneratedElement);
@@ -27968,11 +28477,16 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     }
 
     function v2mProcessDynamicIfElements(jqTemplate) {
+
         var domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate);
 
         if (domarrCurrentGeneratedElements.length > 0) {
-            errorUtil.assert(domarrCurrentGeneratedElements.length === 1);
-            v2mProcessElement(domarrCurrentGeneratedElements[0]);
+            $.each(
+                domarrCurrentGeneratedElements,
+                function(idx, domCurrentGeneratedElement) {
+                    v2mProcessElement(domCurrentGeneratedElement);
+                }
+            );
         }
 
         return domarrCurrentGeneratedElements.length + 1;
@@ -27994,11 +28508,12 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     // propagating changes of model into view
 
     function m2vSetValues(domElement) {
-        var jqElement = $(domElement);
+        var jqElement = $(domElement),
+            m2v = metadata.of(jqElement).m2v;
 
-        if (jqElement.data("_ylcMetadata")) {
+        if (m2v) {
             $.each(
-                jqElement.data("_ylcMetadata").m2v,
+                m2v,
                 function (idx, m2v) {
                     m2v(domElement, my.context);
                 }
@@ -28010,7 +28525,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         ylcLoop,
         domarrCurrentGeneratedElements,
         arrCollection,
-        commonLength
+        commonLength,
+        bUnderlyingCollectionChanged,
+        dynamicElementsPerArrayItem
     ) {
         var index = 0,
             domGeneratedElement;
@@ -28022,16 +28539,77 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                 ylcLoop.strLoopVariable,
                 arrCollection,
                 ylcLoop.strStatusVariable,
-                index
+                Math.floor(index / dynamicElementsPerArrayItem)
             );
 
             index +=
                 m2vProcessElement(
                     domGeneratedElement,
-                    false
+                    false,
+                    bUnderlyingCollectionChanged
                 );
 
             my.context.exitIteration(ylcLoop.strLoopVariable, ylcLoop.strStatusVariable);
+        }
+    }
+
+    function getHandler(strEventName, strMethodName) {
+
+        var annotatedControllerFunction,
+            fnHandler;
+
+        if (strMethodName.length === 0) {
+            fnHandler = EMPTY_FUNCTION;
+
+        } else {
+            annotatedControllerFunction = my.controllerMethods[strMethodName];
+            if (annotatedControllerFunction) {
+                fnHandler = annotatedControllerFunction.code;
+            }
+        }
+
+        if (!(fnHandler instanceof Function)) {
+            throw errorUtil.createError(
+                "Event handler '" + strMethodName + "', " +
+                "specified for event '" + strEventName + "', " +
+                "is not a function."
+            );
+        }
+
+        return fnHandler;
+
+    }
+
+    function isM2vOnly(strMethodName) {
+        var annotatedControllerFunction = my.controllerMethods[strMethodName];
+        if (annotatedControllerFunction) {
+            return annotatedControllerFunction.metadata.m2vOnly;
+        }
+
+        return false;
+    }
+
+    function onElementInit(domElement) {
+
+        var jqElement = $(domElement),
+            listeners = metadata.of(jqElement).listeners,
+            publicContext = createPublicContext(domElement);
+
+        if (listeners && listeners.ylcLifecycle.elementInitialized) {
+            var immediateCallArguments = [my.model, publicContext];
+            if (listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts) {
+                Array.prototype.push.apply(
+                    immediateCallArguments,
+                    evaluateArguments(
+                        listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts,
+                        my.context.getLoopContextMemento()
+                    )
+                );
+            }
+            getHandler(
+                "element initialized",
+                listeners.ylcLifecycle.elementInitialized.strMethodName
+            ).apply(my.controller, immediateCallArguments);
         }
     }
 
@@ -28040,7 +28618,8 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         jqTemplate,
         domarrCurrentGeneratedElements,
         arrCollection,
-        commonLength
+        commonLength,
+        dynamicElementsPerArrayItem
     ) {
 
         var jqLastCommonElement,
@@ -28057,7 +28636,8 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         }
 
         jqLastElement = jqLastCommonElement;
-        for (index = commonLength; index < arrCollection.length; index += 1) {
+
+        for (index = commonLength / dynamicElementsPerArrayItem; index < arrCollection.length; index += 1) {
 
             jqNewDynamicElement =
                 domTemplates.jqCreateElementFromTemplate(
@@ -28073,7 +28653,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             );
 
             elementsProcessed =
-                m2vProcessElement(jqNewDynamicElement.get(), true);
+                m2vProcessElement(jqNewDynamicElement.get(0), true, true);
             errorUtil.assert(
                 elementsProcessed === 1,
                 "If an element is dynamically generated, it can't be a template."
@@ -28081,44 +28661,75 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
             my.context.exitIteration(ylcLoop.strLoopVariable, ylcLoop.strStatusVariable);
 
-            jqLastElement.after(jqNewDynamicElement);
-            jqLastElement = jqNewDynamicElement;
+            if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
+                jqNewDynamicElement.children().each(function() {
+                    jqLastElement.after($(this));
+                    jqLastElement = $(this);
+                });
+            } else {
+                jqLastElement.after(jqNewDynamicElement);
+                jqLastElement = jqNewDynamicElement;
+            }
 
         }
     }
 
+    function getDynamicElementsPerArrayItem(jqTemplate) {
+        if (!metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
+            return 1;
+            
+        } else {
+            return virtualNodes.getOriginal(jqTemplate).children().length;
+        }
+    }
+    
     function m2vProcessDynamicLoopElements(jqTemplate, ylcLoop) {
 
         var domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
-            arrCollection = my.context.getValue(ylcLoop.strCollectionName),
+            arrCollection = my.context.getValue(ylcLoop.astCollection),
+            bUnderlyingCollectionChanged =
+                (metadata.localOf(jqTemplate).loopCollection !== arrCollection),
             commonLength,
+            dynamicElementsPerArrayItem = getDynamicElementsPerArrayItem(jqTemplate),
             idxFirstToDelete,
             index;
-
+        
+        if (metadata.localOf(jqTemplate).loopCollectionLength) {
+            dynamicElementsPerArrayItem = domarrCurrentGeneratedElements.length / metadata.localOf(jqTemplate).loopCollectionLength; 
+        }
+        
         checkIterable(arrCollection);
 
+        if (bUnderlyingCollectionChanged) {
+            metadata.localOf(jqTemplate).loopCollection = arrCollection;
+        }
+        metadata.localOf(jqTemplate).loopCollectionLength = arrCollection.length;
+
         commonLength =
-            Math.min(arrCollection.length, domarrCurrentGeneratedElements.length);
+            Math.min(arrCollection.length * dynamicElementsPerArrayItem, domarrCurrentGeneratedElements.length);
 
         processCommonElements(
             ylcLoop,
             domarrCurrentGeneratedElements,
             arrCollection,
-            commonLength
+            commonLength,
+            bUnderlyingCollectionChanged,
+            dynamicElementsPerArrayItem
         );
 
-        if (arrCollection.length > commonLength) {
+        if (arrCollection.length * dynamicElementsPerArrayItem > commonLength) {
             addExtraElements(
                 ylcLoop,
                 jqTemplate,
                 domarrCurrentGeneratedElements,
                 arrCollection,
-                commonLength
+                commonLength,
+                dynamicElementsPerArrayItem
             );
         }
 
         if (domarrCurrentGeneratedElements.length > commonLength) {
-            idxFirstToDelete = arrCollection.length;
+            idxFirstToDelete = arrCollection.length * dynamicElementsPerArrayItem;
             for (index = idxFirstToDelete;
                  index < domarrCurrentGeneratedElements.length;
                  index += 1) {
@@ -28129,13 +28740,15 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         return domarrCurrentGeneratedElements.length + 1;
     }
 
-    function m2vProcessDynamicIfElements(jqTemplate, strYlcIf) {
-        var ifExpressionValue = my.context.getValue(parseUtil.normalizeWhitespace(strYlcIf)),
+    function m2vProcessDynamicIfElements(jqTemplate, astYlcIf) {
+
+        var ifExpressionValue = my.context.getValue(astYlcIf),
             domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
             jqNewDynamicElement,
-            nElementsProcessed;
+            jqLastElement;
 
         if (ifExpressionValue && domarrCurrentGeneratedElements.length === 0) {
+
             jqNewDynamicElement =
                 domTemplates.jqCreateElementFromTemplate(
                     virtualNodes.getOriginal(jqTemplate),
@@ -28143,26 +28756,35 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                     "_ylcId"
                 );
 
-            nElementsProcessed =
-                m2vProcessElement(jqNewDynamicElement.get(), true);
-            errorUtil.assert(
-                nElementsProcessed === 1,
-                "If an element is dynamically generated, it can't be a template."
-            );
+            m2vProcessElement(jqNewDynamicElement.get(0), true, true);
 
-            jqTemplate.after(jqNewDynamicElement);
+            if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
+                jqLastElement = jqTemplate;
+                jqNewDynamicElement.children().each(function() {
+                    jqLastElement.after($(this));
+                    jqLastElement = $(this);
+                });
+            } else {
+                jqTemplate.after(jqNewDynamicElement);
+            }
 
         } else if (domarrCurrentGeneratedElements.length > 0) {
+
             if (ifExpressionValue) {
-                nElementsProcessed =
-                    m2vProcessElement(
-                        domarrCurrentGeneratedElements[0],
-                        false
-                    );
+                $.each(
+                    domarrCurrentGeneratedElements,
+                    function(idx, domCurrentGeneratedElement) {
+                        m2vProcessElement(domCurrentGeneratedElement, false);
+                    }
+                );
 
             } else {
-                errorUtil.assert(domarrCurrentGeneratedElements.length === 1);
-                $(domarrCurrentGeneratedElements[0]).remove();
+                $.each(
+                    domarrCurrentGeneratedElements,
+                    function(idx, domCurrentGeneratedElement) {
+                        $(domCurrentGeneratedElement).remove();
+                    }
+                );
             }
 
         }
@@ -28173,20 +28795,20 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function m2vProcessDynamicElements(jqTemplate) {
 
-        var metadata = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata");
+        var metadataObj = metadata.of(virtualNodes.getOriginal(jqTemplate));
 
-        if (metadata.ylcLoop) {
-            return m2vProcessDynamicLoopElements(jqTemplate, metadata.ylcLoop);
+        if (metadataObj.ylcLoop) {
+            return m2vProcessDynamicLoopElements(jqTemplate, metadataObj.ylcLoop);
         }
 
-        if (metadata.ylcIf) {
-            return m2vProcessDynamicIfElements(jqTemplate, metadata.ylcIf);
+        if (metadataObj.astYlcIf) {
+            return m2vProcessDynamicIfElements(jqTemplate, metadataObj.astYlcIf);
         }
 
         errorUtil.assert(false);
     }
 
-    function m2vProcessChildren(domElement, bBindEvents) {
+    function m2vProcessChildren(domElement, bFirstVisit, bBindEvents) {
 
         var jqElement = $(domElement),
             jqsetChildren = jqElement.children(),
@@ -28204,6 +28826,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                 index +=
                     m2vProcessElement(
                         domChild,
+                        bFirstVisit,
                         bBindEvents
                     );
 
@@ -28223,18 +28846,18 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         )
     }
 
-    function evaluateArguments(arrArgumentExpressions, loopContextMemento) {
+    function evaluateArguments(arrArgumentAsts, loopContextMemento) {
 
         var context = my.context.newWithLoopContext(loopContextMemento),
             idxArgument,
             arrEvaluatedExpressions = [];
 
-        if (arrArgumentExpressions === null || arrArgumentExpressions === undefined) {
-            return arrArgumentExpressions;
+        if (arrArgumentAsts === null || arrArgumentAsts === undefined) {
+            return arrArgumentAsts;
         }
 
-        for (idxArgument = 0; idxArgument < arrArgumentExpressions.length; idxArgument += 1) {
-            arrEvaluatedExpressions.push(context.getValue(arrArgumentExpressions[idxArgument]));
+        for (idxArgument = 0; idxArgument < arrArgumentAsts.length; idxArgument += 1) {
+            arrEvaluatedExpressions.push(context.getValue(arrArgumentAsts[idxArgument]));
         }
 
         return arrEvaluatedExpressions;
@@ -28245,7 +28868,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             publicContext,
             fnUpdateMethod,
             m2vOnly,
-            arrArgumentExpressions,
+            arrArgumentAsts,
             loopContextMemento
     ) {
 
@@ -28253,11 +28876,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             argumentValues = [my.model, publicContext],
             returnValue;
 
-        if (arrArgumentExpressions) {
+        if (arrArgumentAsts) {
 
             Array.prototype.push.apply(
                 argumentValues,
-                evaluateArguments(arrArgumentExpressions, loopContextMemento)
+                evaluateArguments(arrArgumentAsts, loopContextMemento)
             );
 
         }
@@ -28274,6 +28897,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
             m2vProcessElement(
                 my.domView,
+                false,
                 false
             );
 
@@ -28287,84 +28911,41 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     }
 
-    function createHandler(publicContext, fnHandler, m2vOnly, arrArgumentExpressions, loopContextMemento) {
+    function createHandler(publicContext, fnHandler, m2vOnly, arrArgumentAsts, loopContextMemento) {
         return function (eventObject) {
             publicContext.eventObject = eventObject;
             return callModelUpdatingMethod(
                 publicContext,
                 fnHandler,
                 m2vOnly,
-                arrArgumentExpressions,
+                arrArgumentAsts,
                 loopContextMemento
             );
         };
     }
 
     function m2vBindEvents(domElement) {
+
         var jqElement = $(domElement),
-            strYlcEvents = stringUtil.strGetData(jqElement, "ylcEvents"),
-            arrYlcEvents = ylcEventsParser.parseYlcEvents(strYlcEvents),
-
-            index,
-            currentYlcEvent,
-            fnHandler,
-            publicContext,
-            annotatedControllerFunction,
-
-            m2vOnly,
-            immediateCallArguments;
-
-        for (index = 0; index < arrYlcEvents.length; index += 1) {
-            currentYlcEvent = arrYlcEvents[index];
-            m2vOnly = false;
-
-            if (currentYlcEvent.strMethodName.length === 0) {
-                fnHandler = EMPTY_FUNCTION;
-
-            } else {
-                annotatedControllerFunction = my.controllerMethods[currentYlcEvent.strMethodName];
-                if (annotatedControllerFunction) {
-                    fnHandler = annotatedControllerFunction.code;
-                    if (annotatedControllerFunction.metadata.m2vOnly) {
-                        m2vOnly = true;
-                    }
-                }
-            }
-
-            if (!(fnHandler instanceof Function)) {
-                throw errorUtil.createError(
-                    "Event handler '" + currentYlcEvent.strMethodName + "', " +
-                    "specified for event '" + currentYlcEvent.strEventName + "', " +
-                    "is not a function.",
-                    domElement
-                );
-            }
-
+            listeners = metadata.of(jqElement).listeners,
             publicContext = createPublicContext(domElement);
 
-            if (currentYlcEvent.strEventName === "ylcElementInitialized") {
-                immediateCallArguments = [my.model, publicContext];
-                if (currentYlcEvent.arrArgumentExpressions) {
-                    Array.prototype.push.apply(
-                        immediateCallArguments,
-                        evaluateArguments(
-                            currentYlcEvent.arrArgumentExpressions,
+        if (listeners) {
+            $.each(
+                listeners.jsEvents,
+                function (strEventName, objEventDescriptor) {
+                    jqElement.unbind(strEventName);
+                    jqElement.bind(
+                        strEventName,
+                        createHandler(
+                            publicContext,
+                            getHandler(strEventName, objEventDescriptor.strMethodName),
+                            isM2vOnly(objEventDescriptor.strMethodName),
+                            objEventDescriptor.arrArgumentsAsts,
                             my.context.getLoopContextMemento()
                         )
                     );
                 }
-                fnHandler.apply(my.controller, immediateCallArguments);
-            }
-
-            jqElement.bind(
-                currentYlcEvent.strEventName,
-                createHandler(
-                    publicContext,
-                    fnHandler,
-                    m2vOnly,
-                    currentYlcEvent.arrArgumentExpressions,
-                    my.context.getLoopContextMemento()
-                )
             );
         }
 
@@ -28381,10 +28962,18 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             return callModelUpdatingMethod(publicContext, fnUpdateMethod);
         };
 
+        publicContext.controllerMethods = {};
+            $.each(
+                my.controllerMethods,
+                function(name, method) {
+                    publicContext.controllerMethods[name] = method.code;
+                }
+            );
+
         return publicContext;
     }
 
-    function m2vProcessElement(domElement, bBindEvents) {
+    function m2vProcessElement(domElement, bFirstVisit, bBindEvents) {
 
         var nElementsProcessed;
 
@@ -28394,12 +28983,20 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
             nElementsProcessed = 1;
 
+        } else if ((metadata.of($(domElement)).bHasM2v === 0) && !bFirstVisit && !bBindEvents) {
+            nElementsProcessed = 1;
+
         } else {
+            if (bFirstVisit) {
+                onElementInit(domElement);
+            }
+
             if (bBindEvents) {
                 m2vBindEvents(domElement);
             }
+
             m2vSetValues(domElement);
-            m2vProcessChildren(domElement, bBindEvents);
+            m2vProcessChildren(domElement, bFirstVisit, bBindEvents);
 
             nElementsProcessed = 1;
         }
@@ -28420,16 +29017,17 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         return result;
     }
 
-    function createAdapter(domView, controller) {
+    function createAdapter(domView, controller, includePrivate) {
 
         var adapter = {},
-            controllerMethodNames = getProperties(controller),
+            controllerMethodNames = getProperties(my.controllerMethods),
             adapterMethodArguments;
 
         $.each(controllerMethodNames, function (idxProperty, currentMethodName) {
-            var currentControllerMethod = controller[currentMethodName];
 
-            if (currentControllerMethod instanceof Function) {
+            var currentControllerMethod = my.controllerMethods[currentMethodName];
+
+            if (currentControllerMethod.metadata && (currentControllerMethod.metadata.public || includePrivate)) {
                 adapter[currentMethodName] = function () {
 
                     var returnValue;
@@ -28443,10 +29041,13 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                         adapterMethodArguments.push(argument);
                     });
 
-                    returnValue = currentControllerMethod.apply(controller, adapterMethodArguments);
+                    v2mProcessElement(my.domView);
+                    
+                    returnValue = currentControllerMethod.code.apply(controller, adapterMethodArguments);
 
                     m2vProcessElement(
                         domView,
+                        false,
                         false
                     );
 
@@ -28461,7 +29062,10 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function processExternalEvent(domView, controller, communicationObject) {
         if (communicationObject.eventName === "getAdapter") {
-            communicationObject.result = createAdapter(domView, controller);
+            communicationObject.result = createAdapter(domView, controller, true);
+
+        } else if (communicationObject.eventName === "getPublicApi") {
+            communicationObject.result = createAdapter(domView, controller, false);
         }
     }
 
@@ -28475,37 +29079,56 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         );
     }
 
-    function inOrderTraversal(jqNode, listeners) {
+    function preOrderTraversal(jqNode, listeners, level) {
 
-        var metadata = {},
+        var metadataObj = metadata.of(jqNode),
+            childMetadata,
+            realChildMetadata,
+            preprocessingResult,
             bMakeVirtual = false,
+            bHasV2m = false,
+            bHasM2v = false,
             jqVirtualNode;
 
         $.each(
             listeners,
             function (idx, listener) {
-                bMakeVirtual |= listener.nodeStart(jqNode, metadata);
+                preprocessingResult = listener.nodeStart(jqNode, metadataObj);
+                if ($.isPlainObject(preprocessingResult)) {
+                    bMakeVirtual |= preprocessingResult.bMakeVirtual;
+                    bHasV2m |= preprocessingResult.bHasV2m;
+                    bHasM2v |= preprocessingResult.bHasM2v;
+                } else {
+                    bMakeVirtual |= preprocessingResult;
+                }
             }
         );
 
+        metadata.of(jqNode).level = level;
+        
         if (bMakeVirtual) {
             jqVirtualNode = virtualNodes.makeVirtual(jqNode);
         }
 
         jqNode.children().each(
             function() {
-                inOrderTraversal($(this), listeners);
+                preOrderTraversal($(this), listeners, level + 1);
+                childMetadata = metadata.of($(this));
+                realChildMetadata = metadata.of(virtualNodes.getOriginal($(this)));
+                bHasV2m |= (childMetadata.bHasV2m || realChildMetadata.bHasV2m);
+                bHasM2v |= (childMetadata.bHasM2v || realChildMetadata.bHasM2v);
             }
         );
 
         $.each(
             listeners,
             function (idx, listener) {
-                listener.nodeEnd(jqNode, metadata);
+                listener.nodeEnd(jqNode, metadataObj);
             }
         );
 
-        jqNode.data("_ylcMetadata", metadata);
+        metadataObj.bHasV2m = bHasV2m;
+        metadataObj.bHasM2v = bHasM2v;
 
         return jqVirtualNode ? jqVirtualNode : jqNode;
 
@@ -28513,18 +29136,24 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function setupViewForYlcTraversal() {
 
+        var publicContext = createPublicContext(my.domView);
+
         domAnnotator.markViewRoot($(my.domView));
 
         if (my.controller.init instanceof Function) {
-            my.controller.init.call(
-                my.controller,
-                my.model,
-                createPublicContext(my.domView)
-            );
+            my.callbacks.init.push(my.controller.init);
         }
+
+        $.each(
+            my.callbacks.init,
+            function(idx, callback) {
+                callback.call(my.controller, my.model, publicContext);
+            }
+        );
 
         m2vProcessElement(
             my.domView,
+            true,
             true
         );
 
@@ -28534,19 +29163,25 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     my.model = pModel;
     my.controller = pController;
+    my.mixins = pMixins || [];
 
     my.callbacks = {
+        init: [],
         beforeEvent: [],
         afterEvent: [],
         domPreprocessors: []
     };
 
-    my.controllerMethods = extractControllerMethods([micProcessBindingParameters, micVirtualize, micM2v, micV2m], my.controller);
+    my.controllerMethods =
+        extractControllerMethods(
+            [micProcessBindingParameters, processEventParameters, processMoustacheBindings, micVirtualize, micM2v, micV2m].concat(my.mixins),
+            my.controller
+        );
 
     my.context = contextFactory.newContext(my.model, my.controller, my.controllerMethods);
 
     if (my.callbacks.domPreprocessors.length > 0) {
-        my.domView = inOrderTraversal(pDomView, my.callbacks.domPreprocessors);
+        my.domView = preOrderTraversal(pDomView, my.callbacks.domPreprocessors, 0).get(0);
     }
 
     setupViewForYlcTraversal();
@@ -28565,7 +29200,9 @@ module.exports.triggerExternalEvent = function(domView, eventName, parameter) {
 
     return communicationObject.result;
 };
-},{"./annotationProcessor":74,"./contextFactory":75,"./domAnnotator":76,"./domTemplates":77,"./errorUtil":78,"./mic/m2v":80,"./mic/processBindingParameters":81,"./mic/v2m":82,"./mic/virtualizeTemplates":83,"./parseUtil":84,"./parser/ylcBind":85,"./parser/ylcEvents":86,"./parser/ylcLoop":87,"./stringUtil":90,"./virtualNodes":92}],92:[function(require,module,exports){
+},{"./annotationProcessor":74,"./contextFactory":75,"./domAnnotator":76,"./domTemplates":77,"./errorUtil":79,"./expressionParser":80,"./metadata":82,"./mixin/m2v":83,"./mixin/processBindingParameters":84,"./mixin/processEventParameters":85,"./mixin/processMoustacheBindings":86,"./mixin/v2m":87,"./mixin/virtualizeTemplates":88,"./parseUtil":89,"./stringUtil":97,"./virtualNodes":99}],99:[function(require,module,exports){
+var metadata = require('./metadata');
+
 module.exports = (function () {
 
     function isVirtual(jqElement) {
@@ -28581,20 +29218,20 @@ module.exports = (function () {
                 return jqElement;
             }
 
-            if (jqElement.data("virtualElement")) {
-                return jqElement.data("virtualElement");
+            if (metadata.localOf(jqElement).virtualElement) {
+                return metadata.localOf(jqElement).virtualElement;
             }
 
             var virtualElement = $("<script type='ylc/virtual'></script>"),
-                originalElement = jqElement.replaceWith(virtualElement);
-            virtualElement.data("originalElement", originalElement);
-            originalElement.data("virtualElement", virtualElement);
+                originalElement = metadata.safeElementReplace(jqElement, virtualElement);
+            metadata.localOf(virtualElement).originalElement = originalElement;
+            metadata.localOf(originalElement).virtualElement = virtualElement;
             return virtualElement;
         },
 
         getOriginal: function(jqElement) {
             if (isVirtual(jqElement)) {
-                return jqElement.data("originalElement");
+                return metadata.localOf(jqElement).originalElement;
             } else {
                 return jqElement;
             }
@@ -28605,7 +29242,7 @@ module.exports = (function () {
             if (isVirtual(jqElement)) {
                 return jqElement;
             } else {
-                jqVirtual = jqElement.data("virtualElement");
+                jqVirtual = metadata.localOf(jqElement).virtualElement;
                 return jqVirtual ? jqVirtual : jqElement;
             }
         },
@@ -28617,7 +29254,7 @@ module.exports = (function () {
     };
 
 }());
-},{}],93:[function(require,module,exports){
+},{"./metadata":82}],100:[function(require,module,exports){
 (function ($) {
 
     "use strict";
@@ -28627,6 +29264,10 @@ module.exports = (function () {
         stringUtil = require('./stringUtil'),
         domTemplates = require('./domTemplates'),
         traversor = require('./traversor');
+
+    $.yellowCode = {
+        standardMixins: []
+    };
 
     $.fn.yellowCode = function (parameter1, parameter2, parameter3) {
 
@@ -28641,7 +29282,22 @@ module.exports = (function () {
                 model = {};
                 controller = parameter1;
 
-                traversor.setupTraversal(model, domView, controller);
+                if ($.isArray(controller)) {
+                    traversor.setupTraversal(
+                        model,
+                        domView,
+                        controller[0],
+                        $.yellowCode.standardMixins.concat(controller.slice(1))
+                    );
+
+                } else {
+                    traversor.setupTraversal(
+                        model,
+                        domView,
+                        controller,
+                        $.yellowCode.standardMixins
+                    );
+                }
 
                 if (typeof parameter2 === "string") {
                     objectToReturn = traversor.triggerExternalEvent(domView, parameter2, parameter3);
@@ -28671,7 +29327,7 @@ module.exports = (function () {
 
 }(jQuery));
 
-},{"./domAnnotator":76,"./domTemplates":77,"./errorUtil":78,"./stringUtil":90,"./traversor":91}],94:[function(require,module,exports){
+},{"./domAnnotator":76,"./domTemplates":77,"./errorUtil":79,"./stringUtil":97,"./traversor":98}],101:[function(require,module,exports){
 (function (global){
 var FIXTURE_ID = "__htmlTestingFixture",
 
@@ -28733,7 +29389,7 @@ module.exports = {
 
 };
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../../../src/yellowCode":93,"jquery":15,"tape":63,"tape-dom":61}],95:[function(require,module,exports){
+},{"../../../src/yellowCode":100,"jquery":15,"tape":63,"tape-dom":61}],102:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -28873,7 +29529,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],96:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],103:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -28988,7 +29644,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],97:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],104:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29031,7 +29687,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],98:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],105:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29068,7 +29724,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],99:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],106:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29105,7 +29761,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],100:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],107:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29141,7 +29797,51 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],101:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],108:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    sinon = require('sinon'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "controller methods",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KPC9kaXY+","base64")
+                ),
+            spy = sinon.spy(),
+            mixin = {
+                mixinMethod: function() {
+                    return "mixinMethodResult";
+                }
+            },
+            controller = {
+                init: function(model, context) {
+                    spy(context.controllerMethods.mixinMethod());
+                    spy(context.controllerMethods.controllerMethod());
+                },
+
+                controllerMethod: function() {
+                    return "controllerMethodResult";
+                }
+            };
+
+        jqFixture.children().first().yellowCode([controller, mixin]);
+
+        t.equal(spy.args[0][0], "mixinMethodResult", "mixin method called");
+        t.equal(spy.args[1][0], "controllerMethodResult", "controller method called");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],109:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29261,7 +29961,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],102:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],110:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29343,7 +30043,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],103:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],111:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -29401,7 +30101,51 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],104:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],112:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "Double preprocessing",
+    function (t) {
+
+        var jqFixture =
+            testUtil.setUpFixture(
+                Buffer("PGRpdj4KICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogdmFsdWUiPjwvc3Bhbj4KPC9kaXY+","base64")
+            );
+
+        var controller = {
+            
+            init: function(model) {
+                model.value = "";
+            },
+            
+            setValue: function(model) {
+                model.value = "something";
+            }
+        };
+
+        jqFixture.children().first().yellowCode(controller);
+        jqFixture.children().first().yellowCode(controller);
+
+        jqFixture.children().first().yellowCode("getAdapter").setValue();
+
+        t.equal(
+            jqFixture.find("span").text(),
+            "something",
+            "double preprocessing preserves YLC bind"
+        );
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],113:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -29470,7 +30214,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],105:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],114:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29510,7 +30254,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],106:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],115:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29574,7 +30318,7 @@ test(
             function() {
                 jqFixture.find("#invalidExpression").yellowCode(controller);
             },
-            testUtil.toRegExp("Error: Premature end of binding expression: fsd!@#$"),
+            testUtil.toRegExp("Invalid binding expression for binding 'text' - Error: Unexpected \"}\" at character 0: text: }'"),
             "invalid expression"
         );
 
@@ -29640,7 +30384,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],107:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],116:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29713,7 +30457,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],108:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],117:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -29773,7 +30517,63 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],109:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],118:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    sinon = require('sinon'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "event on shuffled list",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxkaXYgZGF0YS15bGNMb29wPSJlbGVtZW50OiBsaXN0Ij4KICAgICAgICA8YnV0dG9uIGRhdGEteWxjRXZlbnRzPSJjbGljazogcHJpbnQoZWxlbWVudCkiIGRhdGEteWxjQmluZD0idGV4dDogZWxlbWVudC52YWx1ZSI+PC9idXR0b24+CiAgICA8L2Rpdj4KPC9kaXY+","base64")
+                ),
+            jqDynamicallyGeneratedElements,
+            spy = sinon.spy();
+
+        jqFixture.children().first().yellowCode(
+            {
+                init: function(model) {
+                    model.list =
+                        [
+                            {value: 1},
+                            {value: 2}
+                        ];
+                },
+
+                shuffle: function(model) {
+                    model.list = [
+                        model.list[1],
+                        model.list[0]
+                    ];
+                },
+
+                print: function(model, context, element) {
+                    spy(element.value);
+                }
+            }
+        );
+
+        jqFixture.children().first().yellowCode("getAdapter").shuffle();
+
+        jqFixture.find('button:contains("1")').click();
+        jqFixture.find('button:contains("2")').click();
+
+        t.equals(spy.args[0][0], "1", "first button correct arg passed");
+        t.equals(spy.args[1][0], "2", "second button correct arg passed");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],119:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29868,7 +30668,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],110:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],120:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29922,7 +30722,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],111:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],121:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -29968,7 +30768,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],112:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],122:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30053,7 +30853,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],113:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],123:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30092,7 +30892,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],114:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],124:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -30153,7 +30953,70 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],115:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],125:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "has M2V - only virtual elements",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KCiAgICA8c3BhbiBkYXRhLXlsY0lmPSJzaG93Ij5oZWxsbzwvc3Bhbj4KCjwvZGl2Pg==","base64")
+                );
+
+        jqFixture.children().first().yellowCode({});
+        jqFixture.children().first().yellowCode({
+            makeVisible: function(model) {
+                model.show = true;
+            }
+        });
+
+        jqFixture.children().first().yellowCode("getAdapter").makeVisible();
+
+        t.equals(jqFixture.find("span").text(), "hello", "m2v processed");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],126:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil'),
+    metadata = require('../../../src/metadata');
+
+testUtil.setUp();
+
+test(
+    "has M2V, has V2M",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KCiAgICA8ZGl2IGlkPSIwIj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHgiIGNsYXNzPSJ2Mm0iIGlkPSIxIj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHgiIGNsYXNzPSJtMnYiIGlkPSIyIj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0OiB4IiBjbGFzcz0idjJtIG0ydiIgaWQ9IjMiPgogICAgPC9kaXY+CgoKCiAgICA8ZGl2IGlkPSI0Ij4KICAgICAgICA8c3Bhbj48L3NwYW4+CiAgICA8L2Rpdj4KCiAgICA8ZGl2IGRhdGEteWxjQmluZD0idGV4dCAtPiB4IiBjbGFzcz0idjJtIiBpZD0iNSI+CiAgICAgICAgPHNwYW4+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geCIgY2xhc3M9Im0ydiIgaWQ9IjYiPgogICAgICAgIDxzcGFuPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0OiB4IiBjbGFzcz0ibTJ2IHYybSIgaWQ9IjciPgogICAgICAgIDxzcGFuPjwvc3Bhbj4KICAgIDwvZGl2PgoKCgogICAgPGRpdiBjbGFzcz0idjJtIiBpZD0iOCI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHkiPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHgiIGNsYXNzPSJ2Mm0iIGlkPSI5Ij4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgLT4geSI+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geCIgY2xhc3M9InYybSBtMnYiIGlkPSIxMCI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHkiPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0OiB4IiBjbGFzcz0idjJtIG0ydiIgaWQ9IjExIj4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgLT4geSI+PC9zcGFuPgogICAgPC9kaXY+CgoKICAgIDxkaXYgY2xhc3M9Im0ydiIgaWQ9IjEyIj4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geSI+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQgLT4geCIgY2xhc3M9Im0ydiB2Mm0iIGlkPSIxMyI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHkiPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHgiIGNsYXNzPSJtMnYiIGlkPSIxNCI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHkiPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0OiB4IiBjbGFzcz0ibTJ2IHYybSIgaWQ9IjE1Ij4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geSI+PC9zcGFuPgogICAgPC9kaXY+CgoKICAgIDxkaXYgY2xhc3M9Im0ydiB2Mm0iIGlkPSIxNiI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0OiB5Ij48L3NwYW4+CiAgICA8L2Rpdj4KCiAgICA8ZGl2IGRhdGEteWxjQmluZD0idGV4dCAtPiB4IiBjbGFzcz0ibTJ2IHYybSIgaWQ9IjE3Ij4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQ6IHkiPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHgiIGNsYXNzPSJtMnYgdjJtIiBpZD0iMTgiPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogeSI+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQ6IHgiIGNsYXNzPSJtMnYgdjJtIiBpZD0iMTkiPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogeSI+PC9zcGFuPgogICAgPC9kaXY+CgoKICAgIDxkaXYgY2xhc3M9Im0ydiB2Mm0iIGlkPSIyMCI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHkiPjwvc3Bhbj4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geiI+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQgLT4geCIgY2xhc3M9Im0ydiB2Mm0iIGlkPSIyMSI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHkiPjwvc3Bhbj4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geiI+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geCIgY2xhc3M9Im0ydiB2Mm0iIGlkPSIyMiI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHkiPjwvc3Bhbj4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geiI+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQ6IHgiIGNsYXNzPSJtMnYgdjJtIiBpZD0iMjMiPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dCAtPiB5Ij48L3NwYW4+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHoiPjwvc3Bhbj4KICAgIDwvZGl2PgoKCiAgICA8ZGl2IGNsYXNzPSJtMnYgdjJtIiBpZD0iMjQiPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dCAtPiB5Ij48L3NwYW4+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IDwtIHoiPjwvc3Bhbj4KICAgICAgICA8c3Bhbj48L3NwYW4+CiAgICA8L2Rpdj4KCiAgICA8ZGl2IGRhdGEteWxjQmluZD0idGV4dCAtPiB4IiBjbGFzcz0ibTJ2IHYybSIgaWQ9IjI1Ij4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgLT4geSI+PC9zcGFuPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dCA8LSB6Ij48L3NwYW4+CiAgICAgICAgPHNwYW4+PC9zcGFuPgogICAgPC9kaXY+CgogICAgPGRpdiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geCIgY2xhc3M9Im0ydiB2Mm0iIGlkPSIyNiI+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0IC0+IHkiPjwvc3Bhbj4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgPC0geiI+PC9zcGFuPgogICAgICAgIDxzcGFuPjwvc3Bhbj4KICAgIDwvZGl2PgoKICAgIDxkaXYgZGF0YS15bGNCaW5kPSJ0ZXh0OiB4IiBjbGFzcz0ibTJ2IHYybSIgaWQ9IjI3Ij4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQgLT4geSI+PC9zcGFuPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dCA8LSB6Ij48L3NwYW4+CiAgICAgICAgPHNwYW4+PC9zcGFuPgogICAgPC9kaXY+Cgo8L2Rpdj4=","base64")
+                );
+
+        jqFixture.children().first().yellowCode({});
+
+        jqFixture.children().first().find("div").each(function() {
+            t.equal((!!metadata.of($(this)).bHasM2v), (!!$(this).hasClass("m2v")), "correct M2V");
+            t.equal((!!metadata.of($(this)).bHasV2m), (!!$(this).hasClass("v2m")), "correct V2M");
+        });
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../../../src/metadata":82,"../common/testUtil":101,"buffer":4,"tape":63}],127:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30224,7 +31087,43 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],116:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],128:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    sinon = require('sinon'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "@Init",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KPC9kaXY+","base64")
+                ),
+            spy = sinon.spy();
+
+        var controller = {
+            "@Init": {
+                onInit: function(model, context) {
+                    spy();
+                }
+            }
+        };
+
+        jqFixture.children().first().yellowCode(controller);
+
+        t.equal(spy.args.length, 1, "@Init called");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],129:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -30287,7 +31186,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],117:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],130:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30349,7 +31248,36 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],118:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],131:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil'),
+    metadata = require('../../../src/metadata');
+
+testUtil.setUp();
+
+test(
+    "levels",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KCiAgICA8ZGl2IGRhdGEtbGV2ZWw9IjEiPgogICAgICAgIAogICAgICAgIDxkaXYgZGF0YS1sZXZlbD0iMiI+CiAgICAgICAgICAgIAogICAgICAgICAgICA8ZGl2IGRhdGEtbGV2ZWw9IjMiPgogICAgICAgICAgICAgICAgCiAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICAKICAgICAgICAgICAgPGRpdiBkYXRhLWxldmVsPSIzIj4KICAgICAgICAgICAgICAgIAogICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgICAgCiAgICAgICAgICAgIDxkaXYgZGF0YS1sZXZlbD0iMyI+CiAgICAgICAgICAgICAgICA8ZGl2IGRhdGEtbGV2ZWw9IjQiPgogICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgIDwvZGl2PgoKICAgICAgICAgICAgPGRpdiBkYXRhLWxldmVsPSIzIj4KCiAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICAKICAgICAgICA8L2Rpdj4KICAgICAgICAKICAgIDwvZGl2PgoKPC9kaXY+","base64")
+                );
+
+        jqFixture.children().first().yellowCode({});
+
+        jqFixture.children().first().find("div").each(function() {
+            t.equals(metadata.of($(this)).level + "", $(this).attr("data-level"), "level correctly detected");
+        });
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../../../src/metadata":82,"../common/testUtil":101,"buffer":4,"tape":63}],132:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30409,7 +31337,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],119:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],133:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -30463,7 +31391,69 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],120:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],134:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "mixins",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogdmFsdWUxIj48L3NwYW4+CiAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQ6IHZhbHVlMiI+PC9zcGFuPgogICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0OiB2YWx1ZTMiPjwvc3Bhbj4KICAgIDxidXR0b24gZGF0YS15bGNFdmVudHM9ImNsaWNrOiBmdW5jdGlvbjEiPjwvYnV0dG9uPgogICAgPGJ1dHRvbiBkYXRhLXlsY0V2ZW50cz0iY2xpY2s6IGZ1bmN0aW9uMiI+PC9idXR0b24+CiAgICA8YnV0dG9uIGRhdGEteWxjRXZlbnRzPSJjbGljazogZnVuY3Rpb24zIj48L2J1dHRvbj4KPC9kaXY+","base64")
+                ),
+            jqDynamicallyGeneratedElements;
+
+        $.yellowCode.standardMixins = [
+            {
+                function3: function(model) {
+                    model.value3 = "v3";
+                }
+            }
+        ];
+
+        jqFixture.children().first().yellowCode(
+            [
+                {
+                    init: function(model) {
+                        model.value1 = "";
+                        model.value2 = "";
+                        model.value3 = "";
+                    },
+
+                    function1: function(model) {
+                        model.value1 = "v1";
+                    }
+                },
+                {
+                    function2: function(model) {
+                        model.value2 = "v2";
+                    }
+                }
+            ]
+        );
+
+        $.yellowCode.standardMixins = [];
+
+        jqFixture.find("button").click();
+
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+
+        t.equal(jqDynamicallyGeneratedElements.eq(0).text(), "v1", "mixin 1 works");
+        t.equal(jqDynamicallyGeneratedElements.eq(1).text(), "v2", "mixin 2 works");
+        t.equal(jqDynamicallyGeneratedElements.eq(2).text(), "v3", "standard mixin works");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],135:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -30504,7 +31494,101 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],121:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],136:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "moustache",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxzcGFuIGlkPSJzcGFuV2l0aE1vdXN0YWNoZSIgc3R5bGU9ImNvbG9yOiB7e2NvbG9yfX0iPkhlbGxvIHt7YWRkcmVzc2VlfX0sIG15IG5hbWUgaXMge3tteU5hbWV9fSE8L3NwYW4+CiAgICA8c3BhbiBpZD0ibWl4ZWRDb250ZW50c1dpdGhvdXRNb3VzdGFjaGUiPjEyMzxiPjQ1NjwvYj43ODk8L3NwYW4+CiAgICA8c3BhbiBpZD0iaTE4biI+QHt7ZGFzaGJvYXJkLm1lc3NhZ2VzLm51bWJlck9mUmVjb3Jkc1BhcmFncmFwaCwgYWRkcmVzc2VlLCBudW1iZXJPZlJlY29yZHN9fTwvc3Bhbj4KPC9kaXY+","base64")
+                ),
+            spanWithMoustache,
+            mixedContentsWithoutMoustache,
+            i18n;
+
+        jqFixture.yellowCode(
+            {
+                init: function(model) {
+                    model.addressee = "Bob";
+                    model.myName = "Bill";
+                    model.color = "green";
+
+                    model.numberOfRecords = 33;
+                },
+
+                translate: function(key, arg0, arg1) {
+                    if (key === "dashboard.messages.numberOfRecordsParagraph") {
+                        return "Hello " + arg0 + ", you have " + arg1 + " records.";
+                    }
+                }
+            }
+        );
+
+        spanWithMoustache = $("#spanWithMoustache");
+        t.equals(spanWithMoustache.text(), "Hello Bob, my name is Bill!", "text correct");
+        t.equals(spanWithMoustache.attr("style"), "color: green", "attribute correct");
+
+        mixedContentsWithoutMoustache = $("#mixedContentsWithoutMoustache");
+        t.equals(mixedContentsWithoutMoustache.html(), "123<b>456</b>789", "mixed contents without moustache not affected");
+
+        i18n = $("#i18n");
+        t.equals(i18n.text(), "Hello Bob, you have 33 records.", "localized text correct");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],137:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "moustache",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxzcGFuPnt7cGFyYWdyYXBoMX19PGJyLz57e3BhcmFncmFwaDJ9fTwvc3Bhbj4KPC9kaXY+","base64")
+                );
+
+        t.throws(
+            function() {
+                jqFixture.yellowCode(
+                    {
+                        init: function(model) {
+                            model.paragraph1 = "This is paragraph 1.";
+                            model.paragraph2 = "This is paragraph 2.";
+                        }
+                    }
+                );
+            },
+            testUtil.toRegExp(
+                "Error: Elements containing {{...}} cannot be a part of mixed content. " +
+                "Please wrap the chunk of text containing {{...}} into its own element " +
+                "(e.g. <span>, <p>, <g>, etc.)"
+            ),
+            "correct exception thrown"
+        );
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],138:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30518,7 +31602,7 @@ test(
 
         var jqFixture =
                 testUtil.setUpFixture(
-                    Buffer("PHVsPgogICAgPGxpPnZhcmlhYmxlIDE6IDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogdmFyaWFibGUxIj48L3NwYW4+PC9saT4KICAgIDxsaT52YXJpYWJsZSAyOiA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQ6IHZhcmlhYmxlMiI+PC9zcGFuPjwvbGk+CiAgICA8bGk+dmFyaWFibGUgMzogPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0OiB2YXJpYWJsZTMiPjwvc3Bhbj48L2xpPgo8L3VsPg==","base64")
+                    Buffer("PHVsPgogICAgPGxpPnZhcmlhYmxlIDE6IDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogc3VibW9kZWwjdmFyaWFibGUxIj48L3NwYW4+PC9saT4KICAgIDxsaT52YXJpYWJsZSAyOiA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQ6IHN1Ym1vZGVsI3ZhcmlhYmxlMiI+PC9zcGFuPjwvbGk+CiAgICA8bGk+dmFyaWFibGUgMzogPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0OiBzdWJtb2RlbCN2YXJpYWJsZTMiPjwvc3Bhbj48L2xpPgo8L3VsPg==","base64")
                 ),
             submodel = {};
 
@@ -30544,12 +31628,12 @@ test(
 
         jqFixture.children().first().yellowCode("getAdapter").setVariable1("This is value 1.");
         t.equal(submodel.variable1, "This is value 1.", "after 1st event, variable 1");
-        t.equal(submodel.variable2, undefined, "after 1st event, variable 2");
-        t.equal(submodel.variable3, undefined, "after 1st event, variable 3");
+        t.equal(submodel.variable2, "", "after 1st event, variable 2");
+        t.equal(submodel.variable3, "", "after 1st event, variable 3");
 
         jqFixture.children().first().yellowCode("getAdapter").setVariable3("This is value 3.");
         t.equal(submodel.variable1, "This is value 1.", "after 2nd event, variable 1");
-        t.equal(submodel.variable2, undefined, "after 2nd event, variable 2");
+        t.equal(submodel.variable2, "", "after 2nd event, variable 2");
         t.equal(submodel.variable3, "This is value 3.", "after 2nd event, variable 3");
 
         jqFixture.children().first().yellowCode("getAdapter").setVariable2("This is value 2.");
@@ -30563,7 +31647,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],122:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],139:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30619,7 +31703,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],123:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],140:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -30677,7 +31761,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],124:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],141:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -30739,7 +31823,72 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],125:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],142:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    sinon = require('sinon'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "Public API",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj48L2Rpdj4=","base64")
+                ),
+            spy = sinon.spy();
+
+        jqFixture.children().first().yellowCode(
+            {
+                init: function(model, context) {
+                    spy(model, context);
+                },
+
+                private1: function(model, context) {
+                },
+
+                private2: function(model, context) {
+                },
+
+                "@Public": {
+                    public1: function(model, context, arg) {
+                        spy(model, context, arg);
+                    },
+
+                    public2: function(model, context, arg) {
+                        spy(model, context, arg);
+                    }
+                },
+
+                private3: function(model) {
+                }
+            }
+        );
+
+        var publicApi = jqFixture.children().first().yellowCode("getPublicApi");
+        t.equal(Object.keys(publicApi).length, 2, "only public methods")
+
+        publicApi.public1("p1");
+        publicApi.public2("p2");
+
+        t.equal(spy.args[1][0], spy.args[0][0], "model correctly passed");
+        t.ok(spy.args[1][1], "context correctly passed");
+        t.equal(spy.args[1][2], "p1", "argument correctly passed");
+
+        t.equal(spy.args[2][0], spy.args[0][0], "model correctly passed (second method)");
+        t.ok(spy.args[2][1], "context correctly passed (second method)");
+        t.equal(spy.args[2][2], "p2", "argument correctly passed (second method)");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],143:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30819,7 +31968,466 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],126:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],144:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "external event",
+    function (t) {
+
+        var jqFixture =
+            testUtil.setUpFixture(
+                Buffer("PGRpdj4KICAgIDxpbnB1dCBkYXRhLXlsY0JpbmQ9InZhbDogdmFsdWUiIC8+CjwvZGl2Pg==","base64")
+            ),
+            jqView;
+
+        jqView = jqFixture.children().first();
+
+        jqView.yellowCode({
+            init: function(model) {
+                model.value = "";
+            },
+            
+            getValue: function(model) {
+                return model.value;
+            },
+            
+            publicGetValue: {
+                "@Public": function(model) {
+                    return model.value;
+                }
+            }
+            
+        });
+
+        jqView.find("input").val("testValue");
+        var valueRead = jqView.yellowCode("getAdapter").getValue();
+        t.equals(valueRead, "testValue", "value correctly read");
+
+        jqView.find("input").val("testValue2");
+        var valueReadViaPublicApi = jqView.yellowCode("getPublicApi").publicGetValue();
+        t.equals(valueReadViaPublicApi, "testValue2", "value correctly read");
+        
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],145:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+
+test(
+    "remove tag",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxkaXYgZGF0YS15bGNMb29wPSJpdGVtOiBsaXN0IiBkYXRhLXlsY1JlbW92ZVRhZz4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQ6IGl0ZW0iPjwvc3Bhbj4KICAgICAgICA8YnIgLz4KICAgIDwvZGl2Pgo8L2Rpdj4=","base64")
+                ),
+            jqDynamicallyGeneratedElements,
+            publicApi =
+                jqFixture.children().first().yellowCode(
+                    {
+                        init: function(model) {
+                            model.list =
+                                ["aaa", "bbb", "ccc", "ddd", "eee", "fff"];
+                        },
+                        
+                        "@Public": {
+                            addElements: function(model, context, elements) {
+                                $.each(
+                                    elements,
+                                    function(idx, element) {
+                                        model.list.push(element);
+                                    }
+                                );
+                            },
+
+                            removeElementsFromBeginning: function(model, context, nElements) {
+                                var index;
+                                for (index = 0; index < nElements; index += 1) {
+                                    model.list.shift();
+                                }
+                            },
+
+                            removeElementsFromEnd: function(model, context, nElements) {
+                                var index;
+                                for (index = 0; index < nElements; index += 1) {
+                                    model.list.pop();
+                                }
+                            }
+                        }
+                    },
+                    "getPublicApi"
+                );
+
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "aaabbbcccdddeeefff",
+            "correctly generated elements after init"
+        );
+
+        publicApi.addElements(["ggg"]);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "aaabbbcccdddeeefffggg",
+            "correctly generated elements after adding one element"
+        );
+
+        publicApi.addElements(["hhh", "iii", "jjj"]);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "aaabbbcccdddeeefffggghhhiiijjj",
+            "correctly generated elements after adding multiple elements"
+        );
+
+        publicApi.removeElementsFromBeginning(1);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "bbbcccdddeeefffggghhhiiijjj",
+            "correctly generated elements after removing one element from beginning"
+        );
+
+        publicApi.removeElementsFromBeginning(2);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "dddeeefffggghhhiiijjj",
+            "correctly generated elements after removing multiple elements from beginning"
+        );
+
+        publicApi.removeElementsFromEnd(1);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "dddeeefffggghhhiii",
+            "correctly generated elements after removing one element from end"
+        );
+
+        publicApi.removeElementsFromEnd(2);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "dddeeefffggg",
+            "correctly generated elements after removing multiple elements from end"
+        );
+
+        jqFixture.find("br").last().after($("<span>xxx</span><br/>"));
+        publicApi.addElements(["kkk", "lll"]);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "dddeeefffgggkkklllxxx",
+            "correctly generated elements added before a padding HTML"
+        );
+
+        publicApi.removeElementsFromEnd(1);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "dddeeefffgggkkkxxx",
+            "correctly generated elements when one element removed from before a padding HTML"
+        );
+
+        publicApi.removeElementsFromEnd(2);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "dddeeefffxxx",
+            "correctly generated elements when multiple elements removed from before a padding HTML"
+        );
+
+        testUtil.removeFixture();
+        
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],146:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+
+test(
+    "remove tag - if",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxkaXYgZGF0YS15bGNJZj0iY29uZGl0aW9uMSIgZGF0YS15bGNSZW1vdmVUYWc+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0OiBpdGVtMSI+PC9zcGFuPgogICAgICAgIDxiciAvPgogICAgICAgIDxzcGFuIGRhdGEteWxjQmluZD0idGV4dDogaXRlbTEiPjwvc3Bhbj4KICAgICAgICA8YnIgLz4KICAgIDwvZGl2PgogICAgPGRpdiBkYXRhLXlsY0lmPSJjb25kaXRpb24yIiBkYXRhLXlsY1JlbW92ZVRhZz4KICAgICAgICA8c3BhbiBkYXRhLXlsY0JpbmQ9InRleHQ6IGl0ZW0yIj48L3NwYW4+CiAgICAgICAgPGJyIC8+CiAgICAgICAgPHNwYW4gZGF0YS15bGNCaW5kPSJ0ZXh0OiBpdGVtMiI+PC9zcGFuPgogICAgICAgIDxiciAvPgogICAgPC9kaXY+CjwvZGl2Pg==","base64")
+                ),
+            jqDynamicallyGeneratedElements,
+            publicApi =
+                jqFixture.children().first().yellowCode(
+                    {
+                        init: function(model) {
+                            model.condition1 = true;
+                            model.condition2 = true;
+                            model.item1 = "item1";
+                            model.item2 = "item2";
+                        },
+                        
+                        "@Public": {
+                            changeItems: function(model, context, item1, item2) {
+                                model.item1 = item1;
+                                model.item2 = item2;
+                            },
+                            
+                            switchConditions: function(model, context, condition1, condition2) {
+                                model.condition1 = condition1;
+                                model.condition2 = condition2;
+                            }
+                        }
+                    },
+                    "getPublicApi"
+                );
+
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "item1item1item2item2",
+            "correctly generated elements after init"
+        );
+
+        publicApi.changeItems("i1", "i2");
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "i1i1i2i2",
+            "elements correctly processed if conditions not changed"
+        );
+
+        publicApi.switchConditions(false, false);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "",
+            "elements correctly removed"
+        );
+
+        publicApi.changeItems("i3", "i4");
+        publicApi.switchConditions(true, false);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "i3i3",
+            "elements correctly restored according to new condition, correctly processed"
+        );
+
+        publicApi.switchConditions(false, true);
+        jqDynamicallyGeneratedElements = jqFixture.find("span");
+        t.equal(
+            jqDynamicallyGeneratedElements.text(),
+            "i4i4",
+            "elements correctly restored according to new condition, correctly processed"
+        );
+        
+        testUtil.removeFixture();
+        
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],147:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "remove tag - if in loop",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxkaXYgZGF0YS15bGNMb29wPSJpdGVtOiBsb29wIiBkYXRhLXlsY1JlbW92ZVRhZyBjbGFzcz0ibG9vcCI+CiAgICAgICAgPGRpdiBkYXRhLXlsY0lmPSJjb25kaXRpb24iIGRhdGEteWxjUmVtb3ZlVGFnIGNsYXNzPSJpZiI+CiAgICAgICAgICAgIDxzcGFuPng8L3NwYW4+CiAgICAgICAgICAgIDxzcGFuPnk8L3NwYW4+CiAgICAgICAgPC9kaXY+CiAgICA8L2Rpdj4KICAgIDxzdHJvbmc+ejwvc3Ryb25nPgo8L2Rpdj4=","base64")
+                ),
+            jqDynamicallyGeneratedElements,
+            publicApi =
+                jqFixture.children().first().yellowCode(
+                    {
+                        init: function(model) {
+                            model.condition = true;
+                            model.loop = [1];
+                        },
+                        
+                        "@Public": {
+                            addElements: function(model, context) {
+                                model.loop.push(2);
+                            }
+                        }
+                    },
+                    "getPublicApi"
+                );
+        
+        console.log("--- adding element ---");
+
+        publicApi.addElements();
+        
+        //
+        // jqDynamicallyGeneratedElements = jqFixture.find("span");
+        // t.equal(
+        //     jqDynamicallyGeneratedElements.text(),
+        //     "item1item1item2item2",
+        //     "correctly generated elements after init"
+        // );
+
+        //testUtil.removeFixture();
+        
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],148:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "remove tag - input elements",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxkaXYgZGF0YS15bGNMb29wPSJpdGVtOiBsaXN0IiBkYXRhLXlsY1JlbW92ZVRhZz4KICAgICAgICA8aW5wdXQgZGF0YS15bGNCaW5kPSJ2YWw6IGl0ZW0uZmlyc3QiIGRhdGEteWxjRXZlbnRzPSJrZXl1cDogIiAvPgogICAgICAgIDxiciAvPgogICAgICAgIDxpbnB1dCBkYXRhLXlsY0JpbmQ9InZhbDogaXRlbS5zZWNvbmQiIGRhdGEteWxjRXZlbnRzPSJrZXl1cDogIiAvPgogICAgICAgIDxici8+CiAgICA8L2Rpdj4KPC9kaXY+","base64")
+                ),
+            jqDynamicallyGeneratedElements,
+            list =
+                [
+                    {first: "aaa", second: "xxx"},
+                    {first: "bbb", second: "yyy"},
+                    {first: "ccc", second: "zzz"},
+                    {first: "ddd", second: "uuu"},
+                    {first: "eee", second: "vvv"},
+                    {first: "fff", second: "www"}
+                ],
+            publicApi =
+                jqFixture.children().first().yellowCode(
+                    {
+                        init: function(model) {
+                            model.list = list;
+                        }
+                    },
+                    "getPublicApi"
+                );
+
+        jqDynamicallyGeneratedElements = jqFixture.find("input");
+
+        jqDynamicallyGeneratedElements.eq(0).val("100").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(1).val("1000").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(2).val("200").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(3).val("2000").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(4).val("300").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(5).val("3000").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(6).val("400").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(7).val("4000").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(8).val("500").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(9).val("5000").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(10).val("600").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(11).val("6000").trigger("keyup");
+
+        t.deepEqual(
+            list,
+            [
+                {first: "100", second: "1000"},
+                {first: "200", second: "2000"},
+                {first: "300", second: "3000"},
+                {first: "400", second: "4000"},
+                {first: "500", second: "5000"},
+                {first: "600", second: "6000"}
+            ],
+            "correct values set for model"
+        );
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],149:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "remove tag - input elements - if",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxkaXYgZGF0YS15bGNJZj0iY29uZGl0aW9uMSIgZGF0YS15bGNSZW1vdmVUYWc+CiAgICAgICAgPGlucHV0IGRhdGEteWxjQmluZD0idmFsOiBpdGVtc1swXSIgZGF0YS15bGNFdmVudHM9ImtleXVwOiAiIC8+CiAgICAgICAgPGJyIC8+CiAgICAgICAgPGlucHV0IGRhdGEteWxjQmluZD0idmFsOiBpdGVtc1sxXSIgZGF0YS15bGNFdmVudHM9ImtleXVwOiAiIC8+CiAgICAgICAgPGJyLz4KICAgIDwvZGl2PgogICAgPGRpdiBkYXRhLXlsY0lmPSJjb25kaXRpb24yIiBkYXRhLXlsY1JlbW92ZVRhZz4KICAgICAgICA8aW5wdXQgZGF0YS15bGNCaW5kPSJ2YWw6IGl0ZW1zWzJdIiBkYXRhLXlsY0V2ZW50cz0ia2V5dXA6ICIgLz4KICAgICAgICA8YnIgLz4KICAgICAgICA8aW5wdXQgZGF0YS15bGNCaW5kPSJ2YWw6IGl0ZW1zWzNdIiBkYXRhLXlsY0V2ZW50cz0ia2V5dXA6ICIgLz4KICAgICAgICA8YnIvPgogICAgPC9kaXY+CjwvZGl2Pg==","base64")
+                ),
+            jqDynamicallyGeneratedElements,
+            items = ["item1", "item2", "item3", "item4"],
+            publicApi =
+                jqFixture.children().first().yellowCode(
+                    {
+                        init: function(model) {
+                            model.condition1 = true;
+                            model.condition2 = true;
+                            model.items = items;
+                        }
+                    },
+                    "getPublicApi"
+                );
+
+        jqDynamicallyGeneratedElements = jqFixture.find("input");
+        
+        jqDynamicallyGeneratedElements.eq(0).val("100").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(1).val("200").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(2).val("300").trigger("keyup");
+        jqDynamicallyGeneratedElements.eq(3).val("400").trigger("keyup");
+        
+        t.equals(items[0], "100", "correct item 1");
+        t.equals(items[1], "200", "correct item 2");
+        t.equals(items[2], "300", "correct item 3");
+        t.equals(items[3], "400", "correct item 4");
+        
+        /*
+        t.deepEqual(
+            list,
+            [
+                {first: "100", second: "1000"},
+                {first: "200", second: "2000"},
+                {first: "300", second: "3000"},
+                {first: "400", second: "4000"},
+                {first: "500", second: "5000"},
+                {first: "600", second: "6000"}
+            ],
+            "correct values set for model"
+        );
+        */
+
+        //testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"tape":63}],150:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -30871,7 +32479,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],127:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],151:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -31098,7 +32706,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],128:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],152:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -31153,7 +32761,46 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],129:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],153:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    sinon = require('sinon'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "metadata in 3rd party HTML elements",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxzcGFuIGRhdGEteWxjRXZlbnRzPSJ5bGNFbGVtZW50SW5pdGlhbGl6ZWQ6IGFkZEV4dHJhSHRtbCI+PC9zcGFuPgo8L2Rpdj4=","base64")
+                );
+
+        var controller = {
+            addExtraHtml: function(model, context) {
+                $(context.domElement).html("<span></span>");
+            },
+
+            "@Public": {
+                dummy: function(model, context) {
+                }
+            }
+
+        };
+
+        jqFixture.children().first().yellowCode(controller);
+
+        jqFixture.children().first().yellowCode("getPublicApi").dummy();
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],154:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -31245,7 +32892,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],130:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],155:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -31292,7 +32939,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],131:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],156:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     testUtil = require('../common/testUtil');
@@ -31360,7 +33007,7 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"tape":63}],132:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"tape":63}],157:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -31430,7 +33077,54 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],133:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],158:[function(require,module,exports){
+(function (Buffer){
+var test = require('tape'),
+    sinon = require('sinon'),
+    testUtil = require('../common/testUtil');
+
+testUtil.setUp();
+
+test(
+    "YLC element initialized - underlying list changed",
+    function (t) {
+
+        var jqFixture =
+                testUtil.setUpFixture(
+                    Buffer("PGRpdj4KICAgIDxzcGFuIGRhdGEteWxjTG9vcD0iZWxlbWVudDogbGlzdCIgZGF0YS15bGNFbGVtZW50SW5pdD0ib25FbGVtZW50SW5pdCI+CiAgICA8L3NwYW4+CjwvZGl2Pg==","base64")
+                ),
+            spy = sinon.spy();
+
+        jqFixture.children().first().yellowCode(
+            {
+                init: function(model) {
+                    model.list = [1];
+                },
+
+                onElementInit: function() {
+                    spy();
+                },
+
+                "@Public": {
+                    changeList: function(model) {
+                        model.list = [1];
+                    }
+                }
+
+            }
+        );
+
+        jqFixture.children().first().yellowCode("getPublicApi").changeList();
+
+        t.equal(spy.args.length, 1, "init called only once");
+
+        testUtil.removeFixture();
+
+        t.end();
+    }
+);
+}).call(this,require("buffer").Buffer)
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],159:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -31525,7 +33219,72 @@ test(
     }
 );
 }).call(this,require("buffer").Buffer)
-},{"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}],134:[function(require,module,exports){
+},{"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}],160:[function(require,module,exports){
+var test = require("tape"),
+    testUtil = require("../common/testUtil"),
+    domUtil = require("../../../src/domUtil");
+
+testUtil.setUp();
+
+test(
+    "unit: DOM util",
+    function (t) {
+
+        var domClone =
+            domUtil.clone(
+                $("<div data-a='a'><span data-b='b'></span></div>").get(0),
+                    function(domOriginal, domClone) {
+                        if ($(domOriginal).attr("data-a")) {
+                            $(domClone).attr("data-ax", $(domOriginal).attr("data-a") + "y");
+                        }
+
+                        if ($(domOriginal).attr("data-b")) {
+                            $(domClone).attr("data-bx", $(domOriginal).attr("data-b") + "z");
+                        }
+                    }
+                );
+
+        t.equal(
+            domClone.nodeName.toLowerCase(),
+            "div",
+            "correct root element"
+        );
+
+        t.equal(
+            $(domClone).attr("data-a"),
+            "a",
+            "correct original attribute"
+        );
+
+        t.equal(
+            $(domClone).attr("data-ax"),
+            "ay",
+            "correct postprocessor-set attribute"
+        );
+
+        t.equal(
+            domClone.childNodes.length,
+            1,
+            "correct number of children"
+        );
+
+        t.equal(
+            $(domClone.childNodes[0]).attr("data-b"),
+            "b",
+            "correct child original attribute"
+        );
+
+        t.equal(
+            $(domClone.childNodes[0]).attr("data-bx"),
+            "bz",
+            "correct child postprocessor-set attribute"
+        );
+
+        t.end();
+    }
+
+);
+},{"../../../src/domUtil":78,"../common/testUtil":101,"tape":63}],161:[function(require,module,exports){
 var test = require("tape"),
     sinon = require("sinon"),
     testUtil = require("../common/testUtil"),
@@ -31577,31 +33336,211 @@ test(
 
         );
 
-            t.deepEqual(
-                spy.args,
-                [
-                        ["character", "A"],
-                        ["semicolon", ";"],
-                        ["whitespace"],
-                        ["character", "B"],
-                        ["semicolon", ";"],
-                        ["whitespace"],
-                        ["comment", "/*comment*/"],
-                        ["semicolon", ";"],
-                        ["whitespace"],
-                        ["character", "C"],
-                        ["semicolon", ";"],
-                        ["whitespace"],
-                        ["quotes", "'quotes'"]
-                ],
-                "correct callbacks called"
-            );
+        t.deepEqual(
+            spy.args,
+            [
+                    ["character", "A"],
+                    ["semicolon", ";"],
+                    ["whitespace"],
+                    ["character", "B"],
+                    ["semicolon", ";"],
+                    ["whitespace"],
+                    ["comment", "/*comment*/"],
+                    ["semicolon", ";"],
+                    ["whitespace"],
+                    ["character", "C"],
+                    ["semicolon", ";"],
+                    ["whitespace"],
+                    ["quotes", "'quotes'"]
+            ],
+            "correct callbacks called"
+        );
 
         t.end();
 
     }
+
 );
-},{"../../../src/lexer":79,"../common/testUtil":94,"sinon":23,"tape":63}],135:[function(require,module,exports){
+
+test(
+    "unit test: lexer - delimited tokens inside free text",
+    function (t) {
+
+        var spy = sinon.spy();
+
+        lexer.process(
+            "abc{{def}}ghi{{jkl}}mno",
+            [
+                lexer.onDelimitedToken(
+                    "{{",
+                    "}}",
+                    function(strToken) {
+                        spy("delimited", strToken);
+                    }
+                )
+            ],
+            function(strToken) {
+                spy("unmatched", strToken);
+            }
+        );
+
+        t.deepEqual(
+            spy.args,
+            [
+                ["unmatched", "abc"],
+                ["delimited", "{{def}}"],
+                ["unmatched", "ghi"],
+                ["delimited", "{{jkl}}"],
+                ["unmatched", "mno"]
+            ],
+            "correct callbacks called"
+        );
+
+        t.end();
+
+    }
+
+);
+},{"../../../src/lexer":81,"../common/testUtil":101,"sinon":23,"tape":63}],162:[function(require,module,exports){
+var test = require("tape"),
+    testUtil = require("../common/testUtil"),
+    moustache = require('../../../src/parser/moustache');
+
+testUtil.setUp();
+
+test(
+    "unit test: moustache parser",
+    function (t) {
+
+        t.deepEqual(
+            moustache.parse("abc{{def}}ghi{{jkl}}mno"),
+            {
+                "type": "BinaryExpression",
+                "operator": "+",
+                "left": {
+                    "type": "BinaryExpression",
+                    "operator": "+",
+                    "left": {
+                        "type": "BinaryExpression",
+                        "operator": "+",
+                        "left": {
+                            "type": "BinaryExpression",
+                            "operator": "+",
+                            "left": {
+                                "type": "Literal",
+                                "value": "abc",
+                                "raw": "'abc'"
+                            },
+                            "right": {
+                                "type": "Identifier",
+                                "name": "def"
+                            }
+                        },
+                        "right": {
+                            "type": "Literal",
+                            "value": "ghi",
+                            "raw": "'ghi'"
+                        }
+                    },
+                    "right": {
+                        "type": "Identifier",
+                        "name": "jkl"
+                    }
+                },
+                "right": {
+                    "type": "Literal",
+                    "value": "mno",
+                    "raw": "'mno'"
+                }
+            },
+            "starting with literal correctly parsed"
+        );
+
+        t.deepEqual(
+            moustache.parse("{{abc}}def{{ghi}}jkl{{mno}}"),
+            {
+                "type": "BinaryExpression",
+                "operator": "+",
+                "left": {
+                    "type": "BinaryExpression",
+                    "operator": "+",
+                    "left": {
+                        "type": "BinaryExpression",
+                        "operator": "+",
+                        "left": {
+                            "type": "BinaryExpression",
+                            "operator": "+",
+                            "left": {
+                                "type": "Identifier",
+                                "name": "abc"
+                            },
+                            "right": {
+                                "type": "Literal",
+                                "value": "def",
+                                "raw": "'def'"
+                            }
+                        },
+                        "right": {
+                            "type": "Identifier",
+                            "name": "ghi"
+                        }
+                    },
+                    "right": {
+                        "type": "Literal",
+                        "value": "jkl",
+                        "raw": "'jkl'"
+                    }
+                },
+                "right": {
+                    "type": "Identifier",
+                    "name": "mno"
+                }
+            },
+            "starting with identifier correctly parsed"
+        );
+
+        t.deepEqual(
+            moustache.parse("message: @{{dashboard.messages.numberOfRecordsParagraph, name, numberOfRecords}}"),
+            {
+                "type": "BinaryExpression",
+                "operator": "+",
+                "left": {
+                    "type": "Literal",
+                    "value": "message: ",
+                    "raw": "'message: '"
+                },
+                "right": {
+                    "type": "CallExpression",
+                    "arguments": [
+                        {
+                            "type": "Literal",
+                            "value": "dashboard.messages.numberOfRecordsParagraph",
+                            "raw": "'dashboard.messages.numberOfRecordsParagraph'"
+                        },
+                        {
+                            "type": "Identifier",
+                            "name": "name"
+                        },
+                        {
+                            "type": "Identifier",
+                            "name": "numberOfRecords"
+                        }
+                    ],
+                    "callee": {
+                        "type": "Identifier",
+                        "name": "translate"
+                    }
+                }
+            },
+            "translation string parsed correctly"
+        );
+
+        t.end();
+
+    }
+
+);
+},{"../../../src/parser/moustache":90,"../common/testUtil":101,"tape":63}],163:[function(require,module,exports){
 var test = require("tape"),
     testUtil = require("../common/testUtil"),
     parseUtil = require('../../../src/parseUtil');
@@ -31673,7 +33612,176 @@ test(
 
     }
 );
-},{"../../../src/parseUtil":84,"../common/testUtil":94,"tape":63}],136:[function(require,module,exports){
+},{"../../../src/parseUtil":89,"../common/testUtil":101,"tape":63}],164:[function(require,module,exports){
+var test = require("tape"),
+    testUtil = require("../common/testUtil"),
+    processEventParameters = require("../../../src/mixin/processEventParameters");
+
+testUtil.setUp();
+
+test(
+    "unit: process event parameters",
+    function (t) {
+
+        var jqNode =
+                $("<div data-ylcEvents='click: clickHandler(1, 2); ylcElementInitialized: initHandler(3, 4);'></div>"),
+            metadata = {};
+
+        processEventParameters["@DomPreprocessorFactory"]().nodeStart(jqNode, metadata);
+
+        t.deepEqual(
+            metadata.listeners,
+            {
+                "ylcLifecycle": {
+                    "elementInitialized": {
+                        "strMethodName": "initHandler",
+                            "arrArgumentsAsts": [
+                                {
+                                    "type": "Literal",
+                                    "value": 3,
+                                    "raw": "3"
+                                },
+                                {
+                                    "type": "Literal",
+                                    "value": 4,
+                                    "raw": "4"
+                                }
+                            ]
+                        }
+                    },
+                    "jsEvents": {
+                        "click": {
+                            "strMethodName": "clickHandler",
+                            "arrArgumentsAsts": [
+                                {
+                                    "type": "Literal",
+                                    "value": 1,
+                                    "raw": "1"
+                                },
+                                {
+                                    "type": "Literal",
+                                    "value": 2,
+                                    "raw": "2"
+                                }
+                            ]
+                        }
+                    }
+            },
+            "correctly parsed"
+        );
+
+        t.end();
+    }
+
+);
+
+test(
+    "unit: process data-ylcElementInit",
+    function (t) {
+
+        var jqNode =
+                $("<div data-ylcElementInit='initHandler(5, 6)'></div>"),
+            metadata = {};
+
+        processEventParameters["@DomPreprocessorFactory"]().nodeStart(jqNode, metadata);
+
+        t.deepEqual(
+            metadata.listeners,
+            {
+                "ylcLifecycle": {
+                    "elementInitialized": {
+                        "strMethodName": "initHandler",
+                        "arrArgumentsAsts": [
+                            {
+                                "type": "Literal",
+                                "value": 5,
+                                "raw": "5"
+                            },
+                            {
+                                "type": "Literal",
+                                "value": 6,
+                                "raw": "6"
+                            }
+                        ]
+                    }
+                },
+                "jsEvents": {}
+            },
+            "correctly parsed"
+        );
+
+        t.end();
+    }
+
+);
+},{"../../../src/mixin/processEventParameters":85,"../common/testUtil":101,"tape":63}],165:[function(require,module,exports){
+var test = require("tape"),
+    testUtil = require("../common/testUtil"),
+    virtualizeTemplates = require("../../../src/mixin/virtualizeTemplates");
+
+testUtil.setUp();
+
+test(
+    "unit: process templates - loop with data-ylcRemoveTag",
+    function (t) {
+
+        var metadata = {};
+
+        virtualizeTemplates["@DomPreprocessorFactory"]().nodeStart(
+            $("<div data-ylcLoop='element: collection' data-ylcRemoveTag></div>"),
+            metadata
+        );
+
+        t.equals(metadata.bRemoveTag, true, "removeTag recognized");
+
+        t.end();
+    }
+
+);
+
+test(
+    "unit: process templates - loop without data-ylcRemoveTag",
+    function (t) {
+
+        var metadata = {};
+
+        virtualizeTemplates["@DomPreprocessorFactory"]().nodeStart(
+            $("<div data-ylcLoop='element: collection'></div>"),
+            metadata
+        );
+
+        t.equals(!!(metadata.bRemoveTag), false, "removeTag absence recognized");
+
+        t.end();
+    }
+
+);
+
+test(
+    "unit: process templates - data-ylcRemoveTag without loop/if",
+    function (t) {
+
+        var metadata = {};
+
+        t.throws(
+            function() {
+                virtualizeTemplates["@DomPreprocessorFactory"]().nodeStart(
+                    $("<div data-ylcRemoveTag></div>"),
+                    metadata
+                );
+            },
+            testUtil.toRegExp(
+                "The data-ylcRemoveTag attribute can only be used in conjunction with data-ylcIf and " +
+                "data-ylcLoop attributes."
+            ),
+            "throws exception"
+        );
+
+        t.end();
+    }
+
+);
+},{"../../../src/mixin/virtualizeTemplates":88,"../common/testUtil":101,"tape":63}],166:[function(require,module,exports){
 var test = require("tape"),
     testUtil = require("../common/testUtil"),
     stringArrayBuilderFactory = require('../../../src/stringArrayBuilderFactory'),
@@ -31711,7 +33819,7 @@ test(
 
     }
 );
-},{"../../../src/stringArrayBuilderFactory":89,"../common/testUtil":94,"tape":63}],137:[function(require,module,exports){
+},{"../../../src/stringArrayBuilderFactory":95,"../common/testUtil":101,"tape":63}],167:[function(require,module,exports){
 (function (Buffer){
 var test = require('tape'),
     sinon = require('sinon'),
@@ -31767,4 +33875,4 @@ test(
 
 );
 }).call(this,require("buffer").Buffer)
-},{"../../../src/virtualNodes":92,"../common/testUtil":94,"buffer":4,"sinon":23,"tape":63}]},{},[134,135,136,137,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133]);
+},{"../../../src/virtualNodes":99,"../common/testUtil":101,"buffer":4,"sinon":23,"tape":63}]},{},[160,161,162,163,164,165,166,167,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159]);

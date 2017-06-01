@@ -1,5 +1,5 @@
 /*
-Yellow code - a jQuery plugin for 2-way data binding, version 0.99.10 (http://any3w.com/ylc). Distributed under the the BSD 2-Clause License (http://any3w.com/ylc/LICENSE.txt). Internally uses JavaScript Expression Parser (JSEP)  0.3.0 distributed under the MIT License (http://jsep.from.so/).
+Yellow code - a jQuery plugin for 2-way data binding, version 0.99.11 (http://any3w.com/ylc). Distributed under the the BSD 2-Clause License (http://any3w.com/ylc/LICENSE.txt). Internally uses JavaScript Expression Parser (JSEP)  0.3.0 distributed under the MIT License (http://jsep.from.so/).
 */
 
 
@@ -720,14 +720,9 @@ module.exports = (function () {
     };
 
 }());
-},{"./errorUtil":6}],3:[function(require,module,exports){
-var jsep = require('jsep'),
-    errorUtil = require('./errorUtil'),
+},{"./errorUtil":7}],3:[function(require,module,exports){
+var errorUtil = require('./errorUtil'),
     sanityCheck = require('./sanityCheck');
-
-jsep.addBinaryOp("|||", 10);
-jsep.addBinaryOp("#", 10);
-jsep.addBinaryOp("@", 10);
 
 module.exports = {};
 
@@ -1184,8 +1179,7 @@ module.exports.newContext = function newContext(
 
     }
 
-    function gsExpressionValue(strExpression, value, forceSet) {
-        var ast = jsep(strExpression);
+    function gsExpressionValue(ast, value, forceSet) {
         return gsAstValue(ast, value, undefined, forceSet);
     }
 
@@ -1259,15 +1253,15 @@ module.exports.newContext = function newContext(
     /*
      * getValue:
      */
-    that.getValue = function (strExpression) {
-        return gsExpressionValue(strExpression);
+    that.getValue = function (ast) {
+        return gsExpressionValue(ast);
     };
 
     /*
      * setValue:
      */
-    that.setValue = function (strExpression, value, forceSet) {
-        gsExpressionValue(strExpression, value, forceSet);
+    that.setValue = function (ast, value, forceSet) {
+        gsExpressionValue(ast, value, forceSet);
     };
 
     that.getLoopStatusesSnapshot = function () {
@@ -1303,52 +1297,47 @@ module.exports.newContext = function newContext(
     return that;
 
 };
-},{"./errorUtil":6,"./sanityCheck":16,"jsep":1}],4:[function(require,module,exports){
-var virtualNodes = require('./virtualNodes');
+},{"./errorUtil":7,"./sanityCheck":22}],4:[function(require,module,exports){
+var virtualNodes = require('./virtualNodes'),
+    metadata = require('./metadata');
 
 module.exports = (function () {
 
-    var VIEW_ROOT_ATTR_NAME = "data-_ylcViewRoot",
-        VIEW_ROOT_ATTR_VALUE = "data-_ylcViewRoot",
-        TEMPLATE_IDS_CHECKED_ATTR_NAME = "data-_ylcTemplateIdsChecked",
-        TEMPLATE_IDS_CHECKED_ATTR_VALUE = "data-_ylcTemplateIdsChecked";
-
     return {
         markViewRoot: function(jqElement) {
-            virtualNodes.getOriginal(jqElement).attr(VIEW_ROOT_ATTR_NAME, VIEW_ROOT_ATTR_VALUE);
+            metadata.localOf(virtualNodes.getOriginal(jqElement)).viewRoot = true;
         },
 
         unmarkViewRoot: function(jqElement) {
-            virtualNodes.getOriginal(jqElement).removeAttr(VIEW_ROOT_ATTR_NAME);
+            metadata.localOf(virtualNodes.getOriginal(jqElement)).viewRoot = false;
         },
 
         isViewRoot: function(jqElement) {
-            return (virtualNodes.getOriginal(jqElement).attr(VIEW_ROOT_ATTR_NAME) === VIEW_ROOT_ATTR_VALUE);
+            return metadata.localOf(virtualNodes.getOriginal(jqElement)).viewRoot;
         },
 
         markTemplateIdsChecked: function(jqElement) {
-            virtualNodes.getOriginal(jqElement).attr(TEMPLATE_IDS_CHECKED_ATTR_NAME, TEMPLATE_IDS_CHECKED_ATTR_VALUE);
+            metadata.localOf(virtualNodes.getOriginal(jqElement)).templateIdsChecked = true;
         },
 
         areTemplateIdsChecked: function(jqElement) {
-            return (virtualNodes.getOriginal(jqElement).attr(TEMPLATE_IDS_CHECKED_ATTR_NAME) === TEMPLATE_IDS_CHECKED_ATTR_VALUE);
+            return metadata.localOf(virtualNodes.getOriginal(jqElement)).templateIdsChecked;
         }
 
     };
 
 }());
-},{"./virtualNodes":20}],5:[function(require,module,exports){
+},{"./metadata":10,"./virtualNodes":27}],5:[function(require,module,exports){
 var stringUtil = require("./stringUtil"),
     errorUtil = require("./errorUtil"),
     domAnnotator = require('./domAnnotator'),
-    virtualNodes = require('./virtualNodes');
+    virtualNodes = require('./virtualNodes'),
+    metadata = require('./metadata');
 
 module.exports = (function () {
 
     function isDynamicallyGenerated(domElement) {
-        var jqElement = $(domElement);
-        return jqElement.hasClass("_ylcDynamicallyGenerated") ||
-            jqElement.attr("data-_ylcDynamicallyGenerated") === "true";
+        return (!virtualNodes.isVirtual($(domElement))) && metadata.localOf($(domElement)).dynamicallyGenerated;
     }
 
     function findIncludingRoot(jqElement, selector) {
@@ -1390,7 +1379,7 @@ module.exports = (function () {
         var strYlcLoop = stringUtil.strGetData(jqElement, "ylcLoop"),
             strIf = stringUtil.strGetData(jqElement, "ylcIf");
 
-        if (!isDynamicallyGenerated(jqElement.get()) && jqElement.data("_ylcMetadata") && (jqElement.data("_ylcMetadata").ylcLoop || jqElement.data("_ylcMetadata").ylcIf)) {
+        if (!isDynamicallyGenerated(jqElement.get()) && (metadata.of(jqElement).ylcLoop || metadata.of(jqElement).astYlcIf)) {
             return true;
         }
 
@@ -1427,9 +1416,15 @@ module.exports = (function () {
                     strRewriteIdsInTemplateTo
                 );
 
-                jqClone = jqTemplate.clone(true);
-                jqClone.addClass("_ylcDynamicallyGenerated");
-                jqClone.attr("data-_ylcDynamicallyGenerated", "true");
+                jqClone = metadata.safeClone(jqTemplate);
+
+                metadata.localOf(jqClone).dynamicallyGenerated = true;
+                if (metadata.of(jqClone).bRemoveTag) {
+                    jqClone.children().each(function() {
+                        metadata.localOf($(this)).dynamicallyGenerated = true;
+                    });
+                }
+
                 domAnnotator.unmarkViewRoot(jqClone);
 
                 reintroduceIdsInClonedSubtree(jqClone, strRewriteIdsInTemplateTo);
@@ -1440,7 +1435,28 @@ module.exports = (function () {
     };
 
 }());
-},{"./domAnnotator":4,"./errorUtil":6,"./stringUtil":18,"./virtualNodes":20}],6:[function(require,module,exports){
+},{"./domAnnotator":4,"./errorUtil":7,"./metadata":10,"./stringUtil":25,"./virtualNodes":27}],6:[function(require,module,exports){
+module.exports = (function () {
+
+    function clone(domElement, fnPostprocess) {
+        var domClone = domElement.cloneNode(false),
+            idxChild;
+
+        for (idxChild = 0; idxChild < domElement.childNodes.length; idxChild += 1) {
+            domClone.appendChild(clone(domElement.childNodes[idxChild], fnPostprocess));
+        }
+
+        fnPostprocess(domElement, domClone);
+
+        return domClone;
+    }
+
+    return {
+        clone: clone
+    };
+
+}());
+},{}],7:[function(require,module,exports){
 module.exports = (function () {
 
     function createError(message, element) {
@@ -1483,19 +1499,51 @@ module.exports = (function () {
     };
 
 }());
-},{}],7:[function(require,module,exports){
-var stringUtil = require('./stringUtil');
+},{}],8:[function(require,module,exports){
+var jsep = require('jsep');
+
+jsep.addBinaryOp("|||", 10);
+jsep.addBinaryOp("#", 10);
+jsep.addBinaryOp("@", 10);
+
+module.exports = {
+
+    toAst: function(strExpression) {
+        return jsep(strExpression);
+    }
+
+};
+},{"jsep":1}],9:[function(require,module,exports){
+var stringUtil = require("./stringUtil"),
+    stringBuilderFactory = require("./stringBuilderFactory");
+
+function newMatchResult(matchedLength, fnCallback) {
+    return {
+        matchedLength: matchedLength,
+        fnCallback: fnCallback
+    };
+}
 
 module.exports = (function () {
 
     return {
 
-        process: function(string, arrTokenRecognizers) {
+        process: function(string, arrTokenRecognizers, fnUnmatchedCallback) {
             var idxString = 0,
-                nMatchedCharacters,
+                matchResult,
                 idxTokenRecognizer,
                 fnTokenRecognizer,
-                bMatched;
+                bMatched,
+                sbUnmatched = stringBuilderFactory.newStringBuilder();
+
+            function drainUnmatched() {
+                if (sbUnmatched.isNotEmpty()) {
+                    if (fnUnmatchedCallback) {
+                        fnUnmatchedCallback(sbUnmatched.build());
+                        sbUnmatched = stringBuilderFactory.newStringBuilder();
+                    }
+                }
+            }
 
             while (idxString < string.length) {
                 bMatched = false;
@@ -1504,43 +1552,48 @@ module.exports = (function () {
                         idxTokenRecognizer < arrTokenRecognizers.length;
                         idxTokenRecognizer += 1) {
                     fnTokenRecognizer = arrTokenRecognizers[idxTokenRecognizer];
-                    nMatchedCharacters = fnTokenRecognizer(string, idxString);
-                    if (nMatchedCharacters > 0) {
-                        idxString += nMatchedCharacters;
+
+                    matchResult = fnTokenRecognizer(string, idxString);
+
+                    if (matchResult.matchedLength > 0) {
+
+                        drainUnmatched();
+
+                        if (matchResult.fnCallback) {
+                            matchResult.fnCallback(string.substr(idxString, matchResult.matchedLength));
+                        }
+                        idxString += matchResult.matchedLength;
                         bMatched = true;
                         break;
                     }
                 }
 
                 if (!bMatched) {
-                    throw "Unrecognized token in '" + string + "' at position " + idxString + ".";
+                    if (fnUnmatchedCallback) {
+                        sbUnmatched.append(string.substr(idxString, 1));
+                        idxString += 1;
+                    } else {
+                        throw "Unrecognized token in '" + string + "' at position " + idxString + ".";
+                    }
                 }
             }
+
+            drainUnmatched();
 
         },
 
         onDefaultToken: function(callback) {
             return function(string, idxString) {
-                if (callback) {
-                    callback(string.substr(idxString, 1));
-                }
-
-                return 1;
+                return newMatchResult(1, callback);
             }
         },
 
         onConstantToken: function(token, callback) {
             return function(string, idxString) {
-
-                if (!stringUtil.hasSubstringAt(string, token, idxString)) {
-                    return 0;
-                }
-
-                if (callback) {
-                    callback(token);
-                }
-
-                return token.length;
+                return newMatchResult(
+                    stringUtil.hasSubstringAt(string, token, idxString) ? token.length : 0,
+                    callback
+                );
             };
         },
 
@@ -1549,28 +1602,23 @@ module.exports = (function () {
 
                 var idxOpening,
                     idxClosing,
-                    lenToken,
-                    strToken;
+                    lenToken;
 
                 if (!stringUtil.hasSubstringAt(string, opening, idxString)) {
-                    return 0;
+                    return newMatchResult(0, null);
                 }
 
                 idxOpening = idxString;
                 idxClosing = string.indexOf(closing, idxOpening + opening.length);
 
                 if (idxClosing === -1) {
-                    return 0;
+                    return newMatchResult(0, null);
                 }
 
                 lenToken = (idxClosing - idxOpening) + closing.length;
-                strToken = string.substr(idxString, lenToken);
 
-                if (callback) {
-                    callback(strToken);
-                }
+                return newMatchResult(lenToken, callback);
 
-                return lenToken;
             }
         },
 
@@ -1587,19 +1635,79 @@ module.exports = (function () {
 
                 strToken = string.substr(idxStringOriginal, idxStringCurrent - idxStringOriginal);
 
-                if (idxStringCurrent > idxStringOriginal && callback) {
-                    callback(strToken);
-                }
-
-                return strToken.length;
-
+                return newMatchResult(strToken.length, callback);
             }
         }
 
     };
 
 }());
-},{"./stringUtil":18}],8:[function(require,module,exports){
+},{"./stringBuilderFactory":24,"./stringUtil":25}],10:[function(require,module,exports){
+var domUtil = require("./domUtil");
+
+module.exports = (function () {
+
+    var SHARED_METADATA_KEY = "_ylcMetadata",
+        LOCAL_METADATA_KEY = "_ylcNodeSpecificMetadata";
+
+    return {
+
+        of: function(jqElement) {
+            if (!jqElement.data(SHARED_METADATA_KEY)) {
+                jqElement.data(SHARED_METADATA_KEY, {});
+            }
+
+            return jqElement.data(SHARED_METADATA_KEY);
+        },
+
+        localOf: function(jqElement) {
+            if (!jqElement.data(LOCAL_METADATA_KEY)) {
+                jqElement.data(LOCAL_METADATA_KEY, {});
+            }
+
+            return jqElement.data(LOCAL_METADATA_KEY);
+        },
+
+        safeElementReplace: function(jqOriginal, jqNew) {
+            var metadata = jqOriginal.data(SHARED_METADATA_KEY);
+
+            jqOriginal.replaceWith(jqNew);
+            if (metadata) {
+                jqOriginal.data(SHARED_METADATA_KEY, metadata);
+            }
+
+            return jqOriginal;
+        },
+
+        safeClone: function(jqTemplate) {
+
+            var domClone =
+                domUtil.clone(
+                    jqTemplate.get(0),
+                    function(domOriginal, domClone) {
+
+                        $(domClone).data(
+                            SHARED_METADATA_KEY,
+                            $(domOriginal).data(SHARED_METADATA_KEY)
+                        );
+
+                        if ($(domOriginal).data(LOCAL_METADATA_KEY)) {
+                            $(domClone).data(
+                                LOCAL_METADATA_KEY,
+                                $.extend(true, {}, $(domOriginal).data(LOCAL_METADATA_KEY))
+                            );
+                        }
+                    }
+                );
+
+            return $(domClone);
+
+        }
+
+    };
+
+}());
+},{"./domUtil":6}],11:[function(require,module,exports){
 var domTemplates = require("../domTemplates"),
     stringUtil = require("../stringUtil"),
     ylcBindParser = require("../parser/ylcBind"),
@@ -1626,7 +1734,7 @@ function createM2v(currentYlcBinding) {
         }
 
         try {
-            value = context.getValue(currentYlcBinding.strBindingExpression);
+            value = context.getValue(currentYlcBinding.astBindingExpression);
 
         } catch (err) {
             throw errorUtil.elementToError(err, domElement);
@@ -1670,7 +1778,8 @@ module.exports = {
 
                 var arrYlcBind = metadata.ylcBind,
                     idxYlcBind,
-                    currentYlcBinding;
+                    currentYlcBinding,
+                    bHasM2v = false;
 
                 for (idxYlcBind = 0; idxYlcBind < arrYlcBind.length; idxYlcBind += 1) {
                     currentYlcBinding = arrYlcBind[idxYlcBind];
@@ -1685,13 +1794,17 @@ module.exports = {
                         continue;
                     }
 
-                    metadata.m2v.push(
-                        createM2v(currentYlcBinding)
-                    );
+                    metadata.m2v.push(createM2v(currentYlcBinding));
+                    bHasM2v = true;
 
                 }
 
-                return false;
+                return {
+                    bMakeVirtual: false,
+                    bHasV2m: false,
+                    bHasM2v: bHasM2v
+                };
+
             },
 
             nodeEnd: function() {
@@ -1703,7 +1816,7 @@ module.exports = {
     PREFIELD: PREFIELD
 
 };
-},{"../domTemplates":5,"../errorUtil":6,"../parser/ylcBind":13,"../stringUtil":18,"../virtualNodes":20}],9:[function(require,module,exports){
+},{"../domTemplates":5,"../errorUtil":7,"../parser/ylcBind":19,"../stringUtil":25,"../virtualNodes":27}],12:[function(require,module,exports){
 var domTemplates = require("../domTemplates"),
     stringUtil = require("../stringUtil"),
     ylcBindParser = require("../parser/ylcBind"),
@@ -1716,8 +1829,9 @@ module.exports = {
 
         return {
             nodeStart: function(jqNode, metadata) {
+                metadata.ylcBind = metadata.ylcBind || [];
                 var strYlcBind = stringUtil.strGetData(jqNode, "ylcBind");
-                metadata.ylcBind = ylcBindParser.parseYlcBind(strYlcBind);
+                metadata.ylcBind = metadata.ylcBind.concat(ylcBindParser.parseYlcBind(strYlcBind));
                 jqNode.removeAttr("data-ylcBind");
                 return false;
             },
@@ -1729,7 +1843,166 @@ module.exports = {
     }
 
 };
-},{"../domTemplates":5,"../errorUtil":6,"../parser/ylcBind":13,"../stringUtil":18,"../virtualNodes":20}],10:[function(require,module,exports){
+},{"../domTemplates":5,"../errorUtil":7,"../parser/ylcBind":19,"../stringUtil":25,"../virtualNodes":27}],13:[function(require,module,exports){
+var stringUtil = require("../stringUtil"),
+    ylcEventsParser = require("../parser/ylcEvents");
+
+module.exports = {
+
+    "@DomPreprocessorFactory": function() {
+
+        return {
+            nodeStart: function(jqNode, metadata) {
+
+                var strYlcEvents,
+                    arrYlcEvents;
+
+                metadata.listeners =
+                    metadata.listeners || {
+                        ylcLifecycle: {},
+                        jsEvents: {}
+                    };
+
+                strYlcEvents = stringUtil.strGetData(jqNode, "ylcEvents");
+                arrYlcEvents = ylcEventsParser.parseYlcEvents(strYlcEvents);
+
+                $.each(
+                    arrYlcEvents,
+                    function(idx, ylcEvent) {
+
+                        if (ylcEvent.strEventName === "ylcElementInitialized") {
+                            metadata.listeners.ylcLifecycle.elementInitialized =
+                                {
+                                    strMethodName: ylcEvent.strMethodName,
+                                    arrArgumentsAsts: ylcEvent.arrArgumentAsts
+                                };
+
+                        } else {
+                            metadata.listeners.jsEvents[ylcEvent.strEventName] =
+                                {
+                                    strMethodName: ylcEvent.strMethodName,
+                                    arrArgumentsAsts: ylcEvent.arrArgumentAsts
+                                };
+                        }
+
+                    }
+                );
+
+                jqNode.removeAttr("data-ylcEvents");
+
+                var ylcElementInit = stringUtil.strGetData(jqNode, "ylcElementInit");
+                if (ylcElementInit) {
+                    var objHandlerCall = ylcEventsParser.parseEventHandlerCall(ylcElementInit);
+                    metadata.listeners.ylcLifecycle.elementInitialized =
+                        {
+                            strMethodName: objHandlerCall.strMethodName,
+                            arrArgumentsAsts: objHandlerCall.arrArgumentAsts
+                        };
+                }
+                jqNode.removeAttr("data-ylcElementInit");
+
+                return false;
+            },
+
+            nodeEnd: function() {
+                return false;
+            }
+        };
+    }
+
+};
+},{"../parser/ylcEvents":20,"../stringUtil":25}],14:[function(require,module,exports){
+var domTemplates = require("../domTemplates"),
+    stringUtil = require("../stringUtil"),
+    ylcBindParser = require("../parser/ylcBind"),
+    errorUtil = require("../errorUtil"),
+    virtualNodes = require("../virtualNodes"),
+    moustache = require("../parser/moustache");
+
+function pushBinding(metadata, strPropertyName, strSubpropertyName, strExpression) {
+    metadata.ylcBind.push(
+        {
+            strMappingOperator: ylcBindParser.MAPPING_BIDIRECTIONAL,
+            strPropertyName: strPropertyName,
+            strSubpropertyName: strSubpropertyName,
+            astBindingExpression: moustache.parse(strExpression)
+        }
+    );
+}
+
+function getElementText(jqElement) {
+
+    var jqElementContents = jqElement.contents(),
+        jqTextElementsWithMoustache =
+            jqElementContents.filter(function() {
+                return this.nodeType == 3 && moustache.containsMoustache(this.nodeValue);
+            });
+
+    if (jqTextElementsWithMoustache.length === 0) {
+        return;
+    }
+
+    if (jqElementContents.length > 1) {
+        throw errorUtil.createError(
+            "Elements containing {{...}} cannot be a part of mixed content. " +
+                "Please wrap the chunk of text containing {{...}} into its own " +
+                "element (e.g. <span>, <p>, <g>, etc.)",
+            jqElement.get(0)
+        );
+    }
+
+    return jqTextElementsWithMoustache[0].nodeValue;
+}
+
+module.exports = {
+
+    "@DomPreprocessorFactory": function() {
+
+        return {
+            nodeStart: function(jqNode, metadata) {
+
+                metadata.ylcBind = metadata.ylcBind || [];
+
+                var arrAttributes = jqNode.get(0).attributes,
+                    idxAttribute,
+                    elementText,
+                    bHasM2v = false;
+                
+                for (idxAttribute = 0; idxAttribute < arrAttributes.length; idxAttribute += 1) {
+                    if (moustache.containsMoustache(arrAttributes[idxAttribute].value)) {
+                        pushBinding(
+                            metadata,
+                            "attr",
+                            arrAttributes[idxAttribute].name,
+                            arrAttributes[idxAttribute].value
+                        );
+                        bHasM2v = true;
+                    }
+                }
+
+                elementText = getElementText(jqNode);
+
+                if (elementText) {
+                    pushBinding(metadata, "text", undefined, elementText);
+                    bHasM2v = true;
+                }
+
+                return {
+                    bMakeVirtual: false,
+                    bHasV2m: false,
+                    bHasM2v: bHasM2v
+                };
+
+            },
+
+            nodeEnd: function() {
+                return false;
+            }
+        };
+    }
+
+};
+},{"../domTemplates":5,"../errorUtil":7,"../parser/moustache":18,"../parser/ylcBind":19,"../stringUtil":25,"../virtualNodes":27}],15:[function(require,module,exports){
 var domTemplates = require("../domTemplates"),
     stringUtil = require("../stringUtil"),
     ylcBindParser = require("../parser/ylcBind"),
@@ -1768,7 +2041,7 @@ function createV2m(currentYlcBinding) {
         }
 
         try {
-            context.setValue(currentYlcBinding.strBindingExpression, value, forceSet);
+            context.setValue(currentYlcBinding.astBindingExpression, value, forceSet);
 
         } catch (err) {
             throw errorUtil.elementToError(err, domElement);
@@ -1788,7 +2061,8 @@ module.exports = {
 
                 var arrYlcBind = metadata.ylcBind,
                     idxYlcBind,
-                    currentYlcBinding;
+                    currentYlcBinding,
+                    bHasV2m = false;
 
                 for (idxYlcBind = 0; idxYlcBind < arrYlcBind.length; idxYlcBind += 1) {
                     currentYlcBinding = arrYlcBind[idxYlcBind];
@@ -1799,12 +2073,17 @@ module.exports = {
                         continue;
                     }
 
-                    metadata.v2m.push(
-                        createV2m(currentYlcBinding)
-                    );
+                    metadata.v2m.push(createV2m(currentYlcBinding));
+                    bHasV2m = true;
+
                 }
 
-                return false;
+                return {
+                    bMakeVirtual: false,
+                    bHasV2m: bHasV2m,
+                    bHasM2v: false
+                };
+
             },
 
             nodeEnd: function() {
@@ -1814,12 +2093,13 @@ module.exports = {
     }
 
 };
-},{"../domTemplates":5,"../errorUtil":6,"../parser/ylcBind":13,"../stringUtil":18,"../virtualNodes":20}],11:[function(require,module,exports){
+},{"../domTemplates":5,"../errorUtil":7,"../parser/ylcBind":19,"../stringUtil":25,"../virtualNodes":27}],16:[function(require,module,exports){
 var errorUtil = require('../errorUtil'),
     parseUtil = require('../parseUtil'),
     domTemplates = require("../domTemplates"),
     ylcLoopParser = require('../parser/ylcLoop'),
-    stringUtil = require("../stringUtil");
+    stringUtil = require("../stringUtil"),
+    expressionParser = require('../expressionParser');
 
 module.exports = {
 
@@ -1828,7 +2108,8 @@ module.exports = {
             nodeStart: function(jqNode, metadata) {
 
                 var strYlcLoop = stringUtil.strGetData(jqNode, "ylcLoop"),
-                    strYlcIf = stringUtil.strGetData(jqNode, "ylcIf");
+                    strYlcIf = stringUtil.strGetData(jqNode, "ylcIf"),
+                    bRemoveTag = (stringUtil.strGetData(jqNode, "ylcRemoveTag") !== undefined);
 
                 if (strYlcLoop && strYlcIf) {
                     throw errorUtil.createError(
@@ -1842,16 +2123,30 @@ module.exports = {
                     metadata.ylcLoop = ylcLoopParser.parseYlcLoop(strYlcLoop);
 
                 } else if (strYlcIf) {
-                    metadata.ylcIf = parseUtil.normalizeWhitespace(strYlcIf);
+                    metadata.astYlcIf = expressionParser.toAst(parseUtil.normalizeWhitespace(strYlcIf));
 
                 } else {
+                    if (bRemoveTag) {
+                        throw errorUtil.createError(
+                            "The data-ylcRemoveTag attribute can only be used in conjunction with data-ylcIf and " +
+                            "data-ylcLoop attributes.",
+                            jqNode
+                        );
+                    }
+                    
                     return false;
                 }
 
+                metadata.bRemoveTag = bRemoveTag;
+                
                 jqNode.removeAttr("data-ylcLoop");
                 jqNode.removeAttr("data-ylcIf");
 
-                return true;
+                return {
+                    bMakeVirtual: true,
+                    bHasV2m: false,
+                    bHasM2v: true
+                };
 
             },
 
@@ -1862,7 +2157,7 @@ module.exports = {
     }
 
 };
-},{"../domTemplates":5,"../errorUtil":6,"../parseUtil":12,"../parser/ylcLoop":15,"../stringUtil":18}],12:[function(require,module,exports){
+},{"../domTemplates":5,"../errorUtil":7,"../expressionParser":8,"../parseUtil":17,"../parser/ylcLoop":21,"../stringUtil":25}],17:[function(require,module,exports){
 var stringArrayBuilderFactory = require('./stringArrayBuilderFactory'),
     lexer = require('./lexer');
 
@@ -1967,9 +2262,121 @@ module.exports = (function () {
     };
 
 }());
-},{"./lexer":7,"./stringArrayBuilderFactory":17}],13:[function(require,module,exports){
+},{"./lexer":9,"./stringArrayBuilderFactory":23}],18:[function(require,module,exports){
+var lexer = require("../lexer"),
+    parseUtil = require("../parseUtil"),
+    jsep = require("jsep"),
+
+    LEFT_MOUSTACHE_DELIMITER = "{{",
+    RIGHT_MOUSTACHE_DELIMITER = "}}",
+    LEFT_TR_MOUSTACHE_DELIMITER = "@{{",
+    RIGHT_TR_MOUSTACHE_DELIMITER = "}}";
+
+function containsDelimited(strToTest, strOpening, strClosing) {
+    var idxOpening = strToTest.indexOf(strOpening),
+        idxClosing = strToTest.indexOf(strClosing);
+
+    return idxOpening !== -1 && idxClosing !== -1 && (idxClosing - idxOpening >= strOpening.length);
+}
+
+function stringToAst(str) {
+    return jsep("'" + str + "'");
+}
+
+function addAstToAst(astLeft, astRight) {
+
+    if (!astLeft) {
+        return astRight;
+    }
+
+    return {
+        type: "BinaryExpression",
+        operator: "+",
+        left: astLeft,
+        right: astRight
+    };
+
+}
+
+function addStringToAst(astLeft, strRight) {
+
+    if (!astLeft) {
+        return stringToAst(strRight);
+    }
+
+    return addAstToAst(astLeft, stringToAst(strRight));
+}
+
+function createTrAst(strTrExpression) {
+    var arrParts = parseUtil.split(strTrExpression, ","),
+        strKey = arrParts[0],
+        arrArguments = arrParts.slice(1),
+        astResult;
+
+    if (arrArguments.length === 0) {
+        astResult = jsep("translate('" + strKey + "')");
+    } else {
+        astResult = jsep("translate('" + strKey + "', " + arrArguments.join(", ") + ")");
+    }
+
+    return astResult;
+
+}
+
+module.exports = {
+
+    containsMoustache: function(strToTest) {
+        return containsDelimited(strToTest, LEFT_MOUSTACHE_DELIMITER, RIGHT_MOUSTACHE_DELIMITER) ||
+               containsDelimited(strToTest, LEFT_TR_MOUSTACHE_DELIMITER, RIGHT_TR_MOUSTACHE_DELIMITER);
+    },
+
+    parse: function(strExpressionWithMoustache) {
+
+        var astResult = null;
+
+        lexer.process(
+            strExpressionWithMoustache,
+            [
+                lexer.onDelimitedToken(
+                    LEFT_MOUSTACHE_DELIMITER,
+                    RIGHT_MOUSTACHE_DELIMITER,
+                    function(strToken) {
+                        var strExpression =
+                                strToken.substring(
+                                    LEFT_MOUSTACHE_DELIMITER.length,
+                                    strToken.length - RIGHT_MOUSTACHE_DELIMITER.length
+                                );
+                        astResult = addAstToAst(astResult, jsep(strExpression));
+                    }
+                ),
+
+                lexer.onDelimitedToken(
+                    LEFT_TR_MOUSTACHE_DELIMITER,
+                    RIGHT_TR_MOUSTACHE_DELIMITER,
+                    function(strToken) {
+                        var strTrExpression =
+                            strToken.substring(
+                                LEFT_TR_MOUSTACHE_DELIMITER.length,
+                                strToken.length - RIGHT_TR_MOUSTACHE_DELIMITER.length
+                            );
+                        astResult = addAstToAst(astResult, createTrAst(strTrExpression));
+                    }
+                )
+            ],
+            function (strUnmatchedToken) {
+                astResult = addStringToAst(astResult, strUnmatchedToken);
+            }
+        );
+
+        return astResult;
+
+    }
+
+};
+},{"../lexer":9,"../parseUtil":17,"jsep":1}],19:[function(require,module,exports){
 var parseUtil = require("../parseUtil"),
-    errorUtil = require('../errorUtil');
+    errorUtil = require('../errorUtil'),
+    expressionParser = require('../expressionParser');
 
 module.exports = (function () {
 
@@ -2043,7 +2450,9 @@ module.exports = (function () {
             sbExpression = [],
             strPropertyAndSubproperty,
             strPropertyName,
-            strSubpropertyName;
+            strSubpropertyName,
+            strBindingExpression,
+            astBindingExpression;
 
         index = readPropertyAndSubproperty(strBinding, index, sbPropertyAndSubproperty);
         strMappingOperator = pokeMappingOperator(strBinding, index);
@@ -2061,11 +2470,24 @@ module.exports = (function () {
             strSubpropertyName = $.trim(strPropertyAndSubproperty.split(".")[1]);
         }
 
+        strBindingExpression = $.trim(sbExpression.join(""));
+
+        try {
+            astBindingExpression = expressionParser.toAst(strBindingExpression);
+        } catch (parseException) {
+            throw errorUtil.createError(
+                "Invalid binding expression for binding '" + strPropertyAndSubproperty + "' - " +
+                parseException + ": " +
+                strBinding
+            );
+        }
+
         return {
             strPropertyName: strPropertyName,
             strSubpropertyName: strSubpropertyName,
             strMappingOperator: strMappingOperator,
-            strBindingExpression: $.trim(sbExpression.join(""))
+            strBindingExpression: strBindingExpression,
+            astBindingExpression: astBindingExpression
         };
     }
 
@@ -2103,10 +2525,67 @@ module.exports = (function () {
     };
 
 }());
-},{"../errorUtil":6,"../parseUtil":12}],14:[function(require,module,exports){
+},{"../errorUtil":7,"../expressionParser":8,"../parseUtil":17}],20:[function(require,module,exports){
 var stringUtil = require("../stringUtil"),
     errorUtil = require('../errorUtil'),
-    parseUtil = require('../parseUtil');
+    parseUtil = require('../parseUtil'),
+    expressionParser = require('../expressionParser');
+
+function argumentsExpressionToAsts(arrArgumentExpressions) {
+
+    if (arrArgumentExpressions === null || arrArgumentExpressions === undefined) {
+        return arrArgumentExpressions;
+    }
+
+    return $.map(
+        arrArgumentExpressions,
+        expressionParser.toAst
+    );
+
+}
+
+function parseEventHandlerCall(strHandler) {
+
+    var idxArgumentListStart,
+        arrArgumentExpressions,
+        strMethodName,
+        strArgumentList;
+
+    idxArgumentListStart = strHandler.indexOf("(");
+    if (idxArgumentListStart === -1) {
+        strMethodName = $.trim(strHandler);
+        arrArgumentExpressions = [];
+
+    } else {
+
+        if (strHandler.charAt(strHandler.length - 1) !== ')') {
+            throw errorUtil.createError(
+                "Invalid format of the data-ylcEvents parameter: " + strHandler
+            );
+        }
+
+        strMethodName = $.trim(strHandler.substr(0, idxArgumentListStart));
+        strArgumentList =
+            $.trim(
+                strHandler.substr(
+                    idxArgumentListStart + 1,
+                    strHandler.length - idxArgumentListStart - 2
+                )
+            );
+
+        if (strArgumentList.length === 0) {
+            arrArgumentExpressions = [];
+        } else {
+            arrArgumentExpressions = parseUtil.split(strArgumentList, ",");
+        }
+    }
+
+    return {
+        strMethodName: strMethodName,
+        arrArgumentAsts: argumentsExpressionToAsts(arrArgumentExpressions)
+    };
+
+}
 
 module.exports = (function () {
 
@@ -2120,17 +2599,12 @@ module.exports = (function () {
             var result = [],
                 arrEvents = parseUtil.normalizeWhitespace(strYlcEvents).split(";"),
                 index,
-
                 strEvent,
-                arrParts,
                 strEventName,
                 strHandler,
-                idxArgumentListStart,
-                strArgumentList,
-                arrArgumentExpressions,
                 strMethodName,
-
-                idxEventNameHandlerSeparator;
+                idxEventNameHandlerSeparator,
+                objHandlerCall;
 
             for (index = 0; index < arrEvents.length; index += 1) {
                 strEvent = $.trim(arrEvents[index]);
@@ -2153,53 +2627,29 @@ module.exports = (function () {
                             )
                         );
 
-                    idxArgumentListStart = strHandler.indexOf("(");
-                    if (idxArgumentListStart === -1) {
-                        strMethodName = $.trim(strHandler);
-                        arrArgumentExpressions = [];
-
-                    } else {
-
-                        if (strHandler.charAt(strHandler.length - 1) !== ')') {
-                            throw errorUtil.createError(
-                                "Invalid format of the data-ylcEvents parameter: " + strYlcEvents
-                            );
-                        }
-
-                        strMethodName = $.trim(strHandler.substr(0, idxArgumentListStart));
-                        strArgumentList =
-                            $.trim(
-                                strHandler.substr(
-                                    idxArgumentListStart + 1,
-                                    strHandler.length - idxArgumentListStart - 2
-                                )
-                            );
-
-                        if (strArgumentList.length === 0) {
-                            arrArgumentExpressions = [];
-                        } else {
-                            arrArgumentExpressions = parseUtil.split(strArgumentList, ",");
-                        }
-                    }
+                    objHandlerCall = parseEventHandlerCall(strHandler);
 
                     result.push({
                         strEventName: strEventName,
-                        strMethodName: strMethodName,
-                        arrArgumentExpressions: arrArgumentExpressions
+                        strMethodName: objHandlerCall.strMethodName,
+                        arrArgumentAsts: objHandlerCall.arrArgumentAsts
                     });
 
                 }
             }
 
             return result;
-        }
+        },
+
+        parseEventHandlerCall: parseEventHandlerCall
 
     };
 
 }());
-},{"../errorUtil":6,"../parseUtil":12,"../stringUtil":18}],15:[function(require,module,exports){
+},{"../errorUtil":7,"../expressionParser":8,"../parseUtil":17,"../stringUtil":25}],21:[function(require,module,exports){
 var parseUtil = require("../parseUtil"),
-    errorUtil = require('../errorUtil');
+    errorUtil = require('../errorUtil'),
+    expressionParser = require('../expressionParser');
 
 module.exports = (function () {
 
@@ -2213,7 +2663,7 @@ module.exports = (function () {
                 },
                 arrParts = parseUtil.normalizeWhitespace(strYlcLoop).split(":"),
                 strLoopAndStatusVariables,
-                strCollectionName,
+                strCollection,
                 strLoopVariable,
                 strStatusVariable,
                 arrLoopAndStatusParts;
@@ -2223,9 +2673,9 @@ module.exports = (function () {
             }
 
             strLoopAndStatusVariables = $.trim(arrParts[0]);
-            strCollectionName = $.trim(arrParts[1]);
+            strCollection = $.trim(arrParts[1]);
 
-            if (!strLoopAndStatusVariables || !strCollectionName) {
+            if (!strLoopAndStatusVariables || !strCollection) {
                 throwException();
             }
 
@@ -2244,14 +2694,14 @@ module.exports = (function () {
             return {
                 strLoopVariable: strLoopVariable,
                 strStatusVariable: strStatusVariable,
-                strCollectionName: strCollectionName
+                astCollection: expressionParser.toAst(strCollection)
             };
         }
 
     };
 
 }());
-},{"../errorUtil":6,"../parseUtil":12}],16:[function(require,module,exports){
+},{"../errorUtil":7,"../expressionParser":8,"../parseUtil":17}],22:[function(require,module,exports){
 var errorUtil = require('./errorUtil');
 
 module.exports = (function () {
@@ -2273,7 +2723,7 @@ module.exports = (function () {
     };
 
 }());
-},{"./errorUtil":6}],17:[function(require,module,exports){
+},{"./errorUtil":7}],23:[function(require,module,exports){
 var stringUtil = require('./stringUtil');
 
 module.exports = (function () {
@@ -2308,7 +2758,33 @@ module.exports = (function () {
     };
 
 }());
-},{"./stringUtil":18}],18:[function(require,module,exports){
+},{"./stringUtil":25}],24:[function(require,module,exports){
+module.exports = {
+
+    newStringBuilder: function() {
+
+        var sb = [];
+
+        return {
+
+            append: function(strToAppend) {
+                sb.push(strToAppend);
+            },
+
+            isNotEmpty: function() {
+                return sb.length > 0;
+            },
+
+            build: function() {
+                return sb.join("");
+            }
+
+        };
+
+    }
+
+};
+},{}],25:[function(require,module,exports){
 module.exports = (function () {
 
     function hasSubstringAt(string, substring, index) {
@@ -2332,26 +2808,27 @@ module.exports = (function () {
     };
 
 }());
-},{}],19:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 var errorUtil = require('./errorUtil'),
     stringUtil = require('./stringUtil'),
     parseUtil = require('./parseUtil'),
-    ylcBindParser = require('./parser/ylcBind'),
     domTemplates = require('./domTemplates'),
-    ylcEventsParser = require('./parser/ylcEvents'),
-    ylcLoopParser = require('./parser/ylcLoop'),
     domAnnotator = require('./domAnnotator'),
     contextFactory = require('./contextFactory'),
     annotationProcessor = require('./annotationProcessor'),
     virtualNodes = require('./virtualNodes'),
-    micVirtualize = require('./mic/virtualizeTemplates'),
-    micProcessBindingParameters = require('./mic/processBindingParameters'),
-    micM2v = require('./mic/m2v'),
-    micV2m = require('./mic/v2m');
+    micVirtualize = require('./mixin/virtualizeTemplates'),
+    micProcessBindingParameters = require('./mixin/processBindingParameters'),
+    processEventParameters = require('./mixin/processEventParameters'),
+    micM2v = require('./mixin/m2v'),
+    micV2m = require('./mixin/v2m'),
+    processMoustacheBindings = require('./mixin/processMoustacheBindings'),
+    metadata = require('./metadata'),
+    expressionParser = require('./expressionParser');
 
 module.exports = {};
 
-module.exports.setupTraversal = function(pModel, pDomView, pController) {
+module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins) {
 
     var EMPTY_FUNCTION = function () {},
         my = {};
@@ -2359,6 +2836,12 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     function m2vOnlyAnnotationListener(annotation, code, metadata) {
         if (annotation === "@M2vOnly") {
             metadata.m2vOnly = true;
+        }
+    }
+
+    function publicAnnotationListener(annotation, code, metadata) {
+        if (annotation === "@Public") {
+            metadata.public = true;
         }
     }
 
@@ -2371,6 +2854,12 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         }
     }
 
+    function initAnnotationListener(annotation, code, metadata) {
+        if (annotation === "@Init") {
+            my.callbacks.init.push(code);
+        }
+    }
+
     function domPreprocessAnnotationListener(annotation, code, metadata) {
         if (annotation === "@DomPreprocessorFactory") {
             my.callbacks.domPreprocessors.push(code());
@@ -2379,37 +2868,47 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function extractControllerMethods(mixins, controller) {
 
+        var methodsForMixin,
+            result = {},
+            annotationListeners =
+                [
+                    publicAnnotationListener,
+                    m2vOnlyAnnotationListener,
+                    initAnnotationListener,
+                    beforeAfterEventAnnotationListener,
+                    domPreprocessAnnotationListener
+                ];
+
         $.each(
             mixins,
             function(idx, mixin) {
-                annotationProcessor.processAnnotations(
-                    mixin,
-                    [
-                        m2vOnlyAnnotationListener,
-                        beforeAfterEventAnnotationListener,
-                        domPreprocessAnnotationListener
-                    ]
-                );
+                methodsForMixin =
+                    annotationProcessor.processAnnotations(
+                        mixin,
+                        annotationListeners
+                    );
+                $.extend(result, methodsForMixin);
             }
         );
 
-        return annotationProcessor.processAnnotations(
-            controller,
-            [
-                m2vOnlyAnnotationListener,
-                beforeAfterEventAnnotationListener,
-                domPreprocessAnnotationListener
-            ]
-        );
+        methodsForMixin =
+            annotationProcessor.processAnnotations(
+                controller,
+                annotationListeners
+            );
+        $.extend(result, methodsForMixin);
+
+        return result;
     }
 
     function v2mSetValues(domElement) {
 
-        var jqElement = $(domElement);
+        var jqElement = $(domElement),
+            v2m = metadata.of(jqElement).v2m;
 
-        if (jqElement.data("_ylcMetadata")) {
+        if (v2m) {
             $.each(
-                jqElement.data("_ylcMetadata").v2m,
+                v2m,
                 function (idx, v2m) {
                     v2m(domElement, my.context);
                 }
@@ -2427,11 +2926,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         while (true) {
             jqCurrentSibling = jqCurrentSibling.next();
 
-            if (jqCurrentSibling.get() === undefined || !domTemplates.isDynamicallyGenerated(jqCurrentSibling)) {
+            if (jqCurrentSibling.length === 0 || !domTemplates.isDynamicallyGenerated(jqCurrentSibling.get(0))) {
                 break;
             }
 
-            domarrResult.push(jqCurrentSibling.get());
+            domarrResult.push(jqCurrentSibling.get(0));
         }
 
         return domarrResult;
@@ -2448,13 +2947,13 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function v2mProcessDynamicElements(jqTemplate) {
 
-        var metadata = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata");
+        var metadataObj = metadata.of(virtualNodes.getOriginal(jqTemplate));
 
-        if (metadata.ylcLoop) {
+        if (metadataObj.ylcLoop) {
             return v2mProcessDynamicLoopElements(jqTemplate);
         }
 
-        if (metadata.ylcIf) {
+        if (metadataObj.astYlcIf) {
             return v2mProcessDynamicIfElements(jqTemplate);
         }
 
@@ -2467,6 +2966,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
         if (domTemplates.isTemplate(domElement)) {
             nElementsProcessed = v2mProcessDynamicElements($(domElement), my.controller);
+
+        } else if (metadata.of($(domElement)).bHasV2m === 0) {
+            nElementsProcessed = 1;
 
         } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
             nElementsProcessed = 1;
@@ -2483,12 +2985,19 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     function v2mProcessDynamicLoopElements(jqTemplate) {
 
         var idxWithinDynamicallyGenerated,
-            ylcLoop = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata").ylcLoop,
-            arrCollection = my.context.getValue(ylcLoop.strCollectionName),
+            ylcLoop,
+            arrCollection,
             domarrGeneratedElements = getGeneratedElements(jqTemplate),
             domDynamicallyGeneratedElement,
+            dynamicElementsPerArrayItem = getDynamicElementsPerArrayItem(jqTemplate),
             nProcessed;
 
+        if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bHasV2m === 0) {
+            return domarrGeneratedElements.length + 1;
+        }
+
+        ylcLoop = metadata.of(virtualNodes.getOriginal(jqTemplate)).ylcLoop;
+        arrCollection = my.context.getValue(ylcLoop.astCollection);
         checkIterable(arrCollection);
 
         for (idxWithinDynamicallyGenerated = 0;
@@ -2502,7 +3011,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                 ylcLoop.strLoopVariable,
                 arrCollection,
                 ylcLoop.strStatusVariable,
-                idxWithinDynamicallyGenerated
+                Math.floor(idxWithinDynamicallyGenerated / dynamicElementsPerArrayItem)
             );
 
             nProcessed = v2mProcessElement(domDynamicallyGeneratedElement);
@@ -2521,11 +3030,16 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     }
 
     function v2mProcessDynamicIfElements(jqTemplate) {
+
         var domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate);
 
         if (domarrCurrentGeneratedElements.length > 0) {
-            errorUtil.assert(domarrCurrentGeneratedElements.length === 1);
-            v2mProcessElement(domarrCurrentGeneratedElements[0]);
+            $.each(
+                domarrCurrentGeneratedElements,
+                function(idx, domCurrentGeneratedElement) {
+                    v2mProcessElement(domCurrentGeneratedElement);
+                }
+            );
         }
 
         return domarrCurrentGeneratedElements.length + 1;
@@ -2547,11 +3061,12 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
     // propagating changes of model into view
 
     function m2vSetValues(domElement) {
-        var jqElement = $(domElement);
+        var jqElement = $(domElement),
+            m2v = metadata.of(jqElement).m2v;
 
-        if (jqElement.data("_ylcMetadata")) {
+        if (m2v) {
             $.each(
-                jqElement.data("_ylcMetadata").m2v,
+                m2v,
                 function (idx, m2v) {
                     m2v(domElement, my.context);
                 }
@@ -2563,7 +3078,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         ylcLoop,
         domarrCurrentGeneratedElements,
         arrCollection,
-        commonLength
+        commonLength,
+        bUnderlyingCollectionChanged,
+        dynamicElementsPerArrayItem
     ) {
         var index = 0,
             domGeneratedElement;
@@ -2575,16 +3092,77 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                 ylcLoop.strLoopVariable,
                 arrCollection,
                 ylcLoop.strStatusVariable,
-                index
+                Math.floor(index / dynamicElementsPerArrayItem)
             );
 
             index +=
                 m2vProcessElement(
                     domGeneratedElement,
-                    false
+                    false,
+                    bUnderlyingCollectionChanged
                 );
 
             my.context.exitIteration(ylcLoop.strLoopVariable, ylcLoop.strStatusVariable);
+        }
+    }
+
+    function getHandler(strEventName, strMethodName) {
+
+        var annotatedControllerFunction,
+            fnHandler;
+
+        if (strMethodName.length === 0) {
+            fnHandler = EMPTY_FUNCTION;
+
+        } else {
+            annotatedControllerFunction = my.controllerMethods[strMethodName];
+            if (annotatedControllerFunction) {
+                fnHandler = annotatedControllerFunction.code;
+            }
+        }
+
+        if (!(fnHandler instanceof Function)) {
+            throw errorUtil.createError(
+                "Event handler '" + strMethodName + "', " +
+                "specified for event '" + strEventName + "', " +
+                "is not a function."
+            );
+        }
+
+        return fnHandler;
+
+    }
+
+    function isM2vOnly(strMethodName) {
+        var annotatedControllerFunction = my.controllerMethods[strMethodName];
+        if (annotatedControllerFunction) {
+            return annotatedControllerFunction.metadata.m2vOnly;
+        }
+
+        return false;
+    }
+
+    function onElementInit(domElement) {
+
+        var jqElement = $(domElement),
+            listeners = metadata.of(jqElement).listeners,
+            publicContext = createPublicContext(domElement);
+
+        if (listeners && listeners.ylcLifecycle.elementInitialized) {
+            var immediateCallArguments = [my.model, publicContext];
+            if (listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts) {
+                Array.prototype.push.apply(
+                    immediateCallArguments,
+                    evaluateArguments(
+                        listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts,
+                        my.context.getLoopContextMemento()
+                    )
+                );
+            }
+            getHandler(
+                "element initialized",
+                listeners.ylcLifecycle.elementInitialized.strMethodName
+            ).apply(my.controller, immediateCallArguments);
         }
     }
 
@@ -2593,7 +3171,8 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         jqTemplate,
         domarrCurrentGeneratedElements,
         arrCollection,
-        commonLength
+        commonLength,
+        dynamicElementsPerArrayItem
     ) {
 
         var jqLastCommonElement,
@@ -2610,7 +3189,8 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         }
 
         jqLastElement = jqLastCommonElement;
-        for (index = commonLength; index < arrCollection.length; index += 1) {
+
+        for (index = commonLength / dynamicElementsPerArrayItem; index < arrCollection.length; index += 1) {
 
             jqNewDynamicElement =
                 domTemplates.jqCreateElementFromTemplate(
@@ -2626,7 +3206,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             );
 
             elementsProcessed =
-                m2vProcessElement(jqNewDynamicElement.get(), true);
+                m2vProcessElement(jqNewDynamicElement.get(0), true, true);
             errorUtil.assert(
                 elementsProcessed === 1,
                 "If an element is dynamically generated, it can't be a template."
@@ -2634,44 +3214,75 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
             my.context.exitIteration(ylcLoop.strLoopVariable, ylcLoop.strStatusVariable);
 
-            jqLastElement.after(jqNewDynamicElement);
-            jqLastElement = jqNewDynamicElement;
+            if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
+                jqNewDynamicElement.children().each(function() {
+                    jqLastElement.after($(this));
+                    jqLastElement = $(this);
+                });
+            } else {
+                jqLastElement.after(jqNewDynamicElement);
+                jqLastElement = jqNewDynamicElement;
+            }
 
         }
     }
 
+    function getDynamicElementsPerArrayItem(jqTemplate) {
+        if (!metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
+            return 1;
+            
+        } else {
+            return virtualNodes.getOriginal(jqTemplate).children().length;
+        }
+    }
+    
     function m2vProcessDynamicLoopElements(jqTemplate, ylcLoop) {
 
         var domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
-            arrCollection = my.context.getValue(ylcLoop.strCollectionName),
+            arrCollection = my.context.getValue(ylcLoop.astCollection),
+            bUnderlyingCollectionChanged =
+                (metadata.localOf(jqTemplate).loopCollection !== arrCollection),
             commonLength,
+            dynamicElementsPerArrayItem = getDynamicElementsPerArrayItem(jqTemplate),
             idxFirstToDelete,
             index;
-
+        
+        if (metadata.localOf(jqTemplate).loopCollectionLength) {
+            dynamicElementsPerArrayItem = domarrCurrentGeneratedElements.length / metadata.localOf(jqTemplate).loopCollectionLength; 
+        }
+        
         checkIterable(arrCollection);
 
+        if (bUnderlyingCollectionChanged) {
+            metadata.localOf(jqTemplate).loopCollection = arrCollection;
+        }
+        metadata.localOf(jqTemplate).loopCollectionLength = arrCollection.length;
+
         commonLength =
-            Math.min(arrCollection.length, domarrCurrentGeneratedElements.length);
+            Math.min(arrCollection.length * dynamicElementsPerArrayItem, domarrCurrentGeneratedElements.length);
 
         processCommonElements(
             ylcLoop,
             domarrCurrentGeneratedElements,
             arrCollection,
-            commonLength
+            commonLength,
+            bUnderlyingCollectionChanged,
+            dynamicElementsPerArrayItem
         );
 
-        if (arrCollection.length > commonLength) {
+        if (arrCollection.length * dynamicElementsPerArrayItem > commonLength) {
             addExtraElements(
                 ylcLoop,
                 jqTemplate,
                 domarrCurrentGeneratedElements,
                 arrCollection,
-                commonLength
+                commonLength,
+                dynamicElementsPerArrayItem
             );
         }
 
         if (domarrCurrentGeneratedElements.length > commonLength) {
-            idxFirstToDelete = arrCollection.length;
+            idxFirstToDelete = arrCollection.length * dynamicElementsPerArrayItem;
             for (index = idxFirstToDelete;
                  index < domarrCurrentGeneratedElements.length;
                  index += 1) {
@@ -2682,13 +3293,15 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         return domarrCurrentGeneratedElements.length + 1;
     }
 
-    function m2vProcessDynamicIfElements(jqTemplate, strYlcIf) {
-        var ifExpressionValue = my.context.getValue(parseUtil.normalizeWhitespace(strYlcIf)),
+    function m2vProcessDynamicIfElements(jqTemplate, astYlcIf) {
+
+        var ifExpressionValue = my.context.getValue(astYlcIf),
             domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
             jqNewDynamicElement,
-            nElementsProcessed;
+            jqLastElement;
 
         if (ifExpressionValue && domarrCurrentGeneratedElements.length === 0) {
+
             jqNewDynamicElement =
                 domTemplates.jqCreateElementFromTemplate(
                     virtualNodes.getOriginal(jqTemplate),
@@ -2696,26 +3309,35 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                     "_ylcId"
                 );
 
-            nElementsProcessed =
-                m2vProcessElement(jqNewDynamicElement.get(), true);
-            errorUtil.assert(
-                nElementsProcessed === 1,
-                "If an element is dynamically generated, it can't be a template."
-            );
+            m2vProcessElement(jqNewDynamicElement.get(0), true, true);
 
-            jqTemplate.after(jqNewDynamicElement);
+            if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
+                jqLastElement = jqTemplate;
+                jqNewDynamicElement.children().each(function() {
+                    jqLastElement.after($(this));
+                    jqLastElement = $(this);
+                });
+            } else {
+                jqTemplate.after(jqNewDynamicElement);
+            }
 
         } else if (domarrCurrentGeneratedElements.length > 0) {
+
             if (ifExpressionValue) {
-                nElementsProcessed =
-                    m2vProcessElement(
-                        domarrCurrentGeneratedElements[0],
-                        false
-                    );
+                $.each(
+                    domarrCurrentGeneratedElements,
+                    function(idx, domCurrentGeneratedElement) {
+                        m2vProcessElement(domCurrentGeneratedElement, false);
+                    }
+                );
 
             } else {
-                errorUtil.assert(domarrCurrentGeneratedElements.length === 1);
-                $(domarrCurrentGeneratedElements[0]).remove();
+                $.each(
+                    domarrCurrentGeneratedElements,
+                    function(idx, domCurrentGeneratedElement) {
+                        $(domCurrentGeneratedElement).remove();
+                    }
+                );
             }
 
         }
@@ -2726,20 +3348,20 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function m2vProcessDynamicElements(jqTemplate) {
 
-        var metadata = virtualNodes.getOriginal(jqTemplate).data("_ylcMetadata");
+        var metadataObj = metadata.of(virtualNodes.getOriginal(jqTemplate));
 
-        if (metadata.ylcLoop) {
-            return m2vProcessDynamicLoopElements(jqTemplate, metadata.ylcLoop);
+        if (metadataObj.ylcLoop) {
+            return m2vProcessDynamicLoopElements(jqTemplate, metadataObj.ylcLoop);
         }
 
-        if (metadata.ylcIf) {
-            return m2vProcessDynamicIfElements(jqTemplate, metadata.ylcIf);
+        if (metadataObj.astYlcIf) {
+            return m2vProcessDynamicIfElements(jqTemplate, metadataObj.astYlcIf);
         }
 
         errorUtil.assert(false);
     }
 
-    function m2vProcessChildren(domElement, bBindEvents) {
+    function m2vProcessChildren(domElement, bFirstVisit, bBindEvents) {
 
         var jqElement = $(domElement),
             jqsetChildren = jqElement.children(),
@@ -2757,6 +3379,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                 index +=
                     m2vProcessElement(
                         domChild,
+                        bFirstVisit,
                         bBindEvents
                     );
 
@@ -2776,18 +3399,18 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         )
     }
 
-    function evaluateArguments(arrArgumentExpressions, loopContextMemento) {
+    function evaluateArguments(arrArgumentAsts, loopContextMemento) {
 
         var context = my.context.newWithLoopContext(loopContextMemento),
             idxArgument,
             arrEvaluatedExpressions = [];
 
-        if (arrArgumentExpressions === null || arrArgumentExpressions === undefined) {
-            return arrArgumentExpressions;
+        if (arrArgumentAsts === null || arrArgumentAsts === undefined) {
+            return arrArgumentAsts;
         }
 
-        for (idxArgument = 0; idxArgument < arrArgumentExpressions.length; idxArgument += 1) {
-            arrEvaluatedExpressions.push(context.getValue(arrArgumentExpressions[idxArgument]));
+        for (idxArgument = 0; idxArgument < arrArgumentAsts.length; idxArgument += 1) {
+            arrEvaluatedExpressions.push(context.getValue(arrArgumentAsts[idxArgument]));
         }
 
         return arrEvaluatedExpressions;
@@ -2798,7 +3421,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             publicContext,
             fnUpdateMethod,
             m2vOnly,
-            arrArgumentExpressions,
+            arrArgumentAsts,
             loopContextMemento
     ) {
 
@@ -2806,11 +3429,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             argumentValues = [my.model, publicContext],
             returnValue;
 
-        if (arrArgumentExpressions) {
+        if (arrArgumentAsts) {
 
             Array.prototype.push.apply(
                 argumentValues,
-                evaluateArguments(arrArgumentExpressions, loopContextMemento)
+                evaluateArguments(arrArgumentAsts, loopContextMemento)
             );
 
         }
@@ -2827,6 +3450,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
             m2vProcessElement(
                 my.domView,
+                false,
                 false
             );
 
@@ -2840,84 +3464,41 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     }
 
-    function createHandler(publicContext, fnHandler, m2vOnly, arrArgumentExpressions, loopContextMemento) {
+    function createHandler(publicContext, fnHandler, m2vOnly, arrArgumentAsts, loopContextMemento) {
         return function (eventObject) {
             publicContext.eventObject = eventObject;
             return callModelUpdatingMethod(
                 publicContext,
                 fnHandler,
                 m2vOnly,
-                arrArgumentExpressions,
+                arrArgumentAsts,
                 loopContextMemento
             );
         };
     }
 
     function m2vBindEvents(domElement) {
+
         var jqElement = $(domElement),
-            strYlcEvents = stringUtil.strGetData(jqElement, "ylcEvents"),
-            arrYlcEvents = ylcEventsParser.parseYlcEvents(strYlcEvents),
-
-            index,
-            currentYlcEvent,
-            fnHandler,
-            publicContext,
-            annotatedControllerFunction,
-
-            m2vOnly,
-            immediateCallArguments;
-
-        for (index = 0; index < arrYlcEvents.length; index += 1) {
-            currentYlcEvent = arrYlcEvents[index];
-            m2vOnly = false;
-
-            if (currentYlcEvent.strMethodName.length === 0) {
-                fnHandler = EMPTY_FUNCTION;
-
-            } else {
-                annotatedControllerFunction = my.controllerMethods[currentYlcEvent.strMethodName];
-                if (annotatedControllerFunction) {
-                    fnHandler = annotatedControllerFunction.code;
-                    if (annotatedControllerFunction.metadata.m2vOnly) {
-                        m2vOnly = true;
-                    }
-                }
-            }
-
-            if (!(fnHandler instanceof Function)) {
-                throw errorUtil.createError(
-                    "Event handler '" + currentYlcEvent.strMethodName + "', " +
-                    "specified for event '" + currentYlcEvent.strEventName + "', " +
-                    "is not a function.",
-                    domElement
-                );
-            }
-
+            listeners = metadata.of(jqElement).listeners,
             publicContext = createPublicContext(domElement);
 
-            if (currentYlcEvent.strEventName === "ylcElementInitialized") {
-                immediateCallArguments = [my.model, publicContext];
-                if (currentYlcEvent.arrArgumentExpressions) {
-                    Array.prototype.push.apply(
-                        immediateCallArguments,
-                        evaluateArguments(
-                            currentYlcEvent.arrArgumentExpressions,
+        if (listeners) {
+            $.each(
+                listeners.jsEvents,
+                function (strEventName, objEventDescriptor) {
+                    jqElement.unbind(strEventName);
+                    jqElement.bind(
+                        strEventName,
+                        createHandler(
+                            publicContext,
+                            getHandler(strEventName, objEventDescriptor.strMethodName),
+                            isM2vOnly(objEventDescriptor.strMethodName),
+                            objEventDescriptor.arrArgumentsAsts,
                             my.context.getLoopContextMemento()
                         )
                     );
                 }
-                fnHandler.apply(my.controller, immediateCallArguments);
-            }
-
-            jqElement.bind(
-                currentYlcEvent.strEventName,
-                createHandler(
-                    publicContext,
-                    fnHandler,
-                    m2vOnly,
-                    currentYlcEvent.arrArgumentExpressions,
-                    my.context.getLoopContextMemento()
-                )
             );
         }
 
@@ -2934,10 +3515,18 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
             return callModelUpdatingMethod(publicContext, fnUpdateMethod);
         };
 
+        publicContext.controllerMethods = {};
+            $.each(
+                my.controllerMethods,
+                function(name, method) {
+                    publicContext.controllerMethods[name] = method.code;
+                }
+            );
+
         return publicContext;
     }
 
-    function m2vProcessElement(domElement, bBindEvents) {
+    function m2vProcessElement(domElement, bFirstVisit, bBindEvents) {
 
         var nElementsProcessed;
 
@@ -2947,12 +3536,20 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
             nElementsProcessed = 1;
 
+        } else if ((metadata.of($(domElement)).bHasM2v === 0) && !bFirstVisit && !bBindEvents) {
+            nElementsProcessed = 1;
+
         } else {
+            if (bFirstVisit) {
+                onElementInit(domElement);
+            }
+
             if (bBindEvents) {
                 m2vBindEvents(domElement);
             }
+
             m2vSetValues(domElement);
-            m2vProcessChildren(domElement, bBindEvents);
+            m2vProcessChildren(domElement, bFirstVisit, bBindEvents);
 
             nElementsProcessed = 1;
         }
@@ -2973,16 +3570,17 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         return result;
     }
 
-    function createAdapter(domView, controller) {
+    function createAdapter(domView, controller, includePrivate) {
 
         var adapter = {},
-            controllerMethodNames = getProperties(controller),
+            controllerMethodNames = getProperties(my.controllerMethods),
             adapterMethodArguments;
 
         $.each(controllerMethodNames, function (idxProperty, currentMethodName) {
-            var currentControllerMethod = controller[currentMethodName];
 
-            if (currentControllerMethod instanceof Function) {
+            var currentControllerMethod = my.controllerMethods[currentMethodName];
+
+            if (currentControllerMethod.metadata && (currentControllerMethod.metadata.public || includePrivate)) {
                 adapter[currentMethodName] = function () {
 
                     var returnValue;
@@ -2996,10 +3594,13 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
                         adapterMethodArguments.push(argument);
                     });
 
-                    returnValue = currentControllerMethod.apply(controller, adapterMethodArguments);
+                    v2mProcessElement(my.domView);
+                    
+                    returnValue = currentControllerMethod.code.apply(controller, adapterMethodArguments);
 
                     m2vProcessElement(
                         domView,
+                        false,
                         false
                     );
 
@@ -3014,7 +3615,10 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function processExternalEvent(domView, controller, communicationObject) {
         if (communicationObject.eventName === "getAdapter") {
-            communicationObject.result = createAdapter(domView, controller);
+            communicationObject.result = createAdapter(domView, controller, true);
+
+        } else if (communicationObject.eventName === "getPublicApi") {
+            communicationObject.result = createAdapter(domView, controller, false);
         }
     }
 
@@ -3028,37 +3632,56 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
         );
     }
 
-    function inOrderTraversal(jqNode, listeners) {
+    function preOrderTraversal(jqNode, listeners, level) {
 
-        var metadata = {},
+        var metadataObj = metadata.of(jqNode),
+            childMetadata,
+            realChildMetadata,
+            preprocessingResult,
             bMakeVirtual = false,
+            bHasV2m = false,
+            bHasM2v = false,
             jqVirtualNode;
 
         $.each(
             listeners,
             function (idx, listener) {
-                bMakeVirtual |= listener.nodeStart(jqNode, metadata);
+                preprocessingResult = listener.nodeStart(jqNode, metadataObj);
+                if ($.isPlainObject(preprocessingResult)) {
+                    bMakeVirtual |= preprocessingResult.bMakeVirtual;
+                    bHasV2m |= preprocessingResult.bHasV2m;
+                    bHasM2v |= preprocessingResult.bHasM2v;
+                } else {
+                    bMakeVirtual |= preprocessingResult;
+                }
             }
         );
 
+        metadata.of(jqNode).level = level;
+        
         if (bMakeVirtual) {
             jqVirtualNode = virtualNodes.makeVirtual(jqNode);
         }
 
         jqNode.children().each(
             function() {
-                inOrderTraversal($(this), listeners);
+                preOrderTraversal($(this), listeners, level + 1);
+                childMetadata = metadata.of($(this));
+                realChildMetadata = metadata.of(virtualNodes.getOriginal($(this)));
+                bHasV2m |= (childMetadata.bHasV2m || realChildMetadata.bHasV2m);
+                bHasM2v |= (childMetadata.bHasM2v || realChildMetadata.bHasM2v);
             }
         );
 
         $.each(
             listeners,
             function (idx, listener) {
-                listener.nodeEnd(jqNode, metadata);
+                listener.nodeEnd(jqNode, metadataObj);
             }
         );
 
-        jqNode.data("_ylcMetadata", metadata);
+        metadataObj.bHasV2m = bHasV2m;
+        metadataObj.bHasM2v = bHasM2v;
 
         return jqVirtualNode ? jqVirtualNode : jqNode;
 
@@ -3066,18 +3689,24 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     function setupViewForYlcTraversal() {
 
+        var publicContext = createPublicContext(my.domView);
+
         domAnnotator.markViewRoot($(my.domView));
 
         if (my.controller.init instanceof Function) {
-            my.controller.init.call(
-                my.controller,
-                my.model,
-                createPublicContext(my.domView)
-            );
+            my.callbacks.init.push(my.controller.init);
         }
+
+        $.each(
+            my.callbacks.init,
+            function(idx, callback) {
+                callback.call(my.controller, my.model, publicContext);
+            }
+        );
 
         m2vProcessElement(
             my.domView,
+            true,
             true
         );
 
@@ -3087,19 +3716,25 @@ module.exports.setupTraversal = function(pModel, pDomView, pController) {
 
     my.model = pModel;
     my.controller = pController;
+    my.mixins = pMixins || [];
 
     my.callbacks = {
+        init: [],
         beforeEvent: [],
         afterEvent: [],
         domPreprocessors: []
     };
 
-    my.controllerMethods = extractControllerMethods([micProcessBindingParameters, micVirtualize, micM2v, micV2m], my.controller);
+    my.controllerMethods =
+        extractControllerMethods(
+            [micProcessBindingParameters, processEventParameters, processMoustacheBindings, micVirtualize, micM2v, micV2m].concat(my.mixins),
+            my.controller
+        );
 
     my.context = contextFactory.newContext(my.model, my.controller, my.controllerMethods);
 
     if (my.callbacks.domPreprocessors.length > 0) {
-        my.domView = inOrderTraversal(pDomView, my.callbacks.domPreprocessors);
+        my.domView = preOrderTraversal(pDomView, my.callbacks.domPreprocessors, 0).get(0);
     }
 
     setupViewForYlcTraversal();
@@ -3118,7 +3753,9 @@ module.exports.triggerExternalEvent = function(domView, eventName, parameter) {
 
     return communicationObject.result;
 };
-},{"./annotationProcessor":2,"./contextFactory":3,"./domAnnotator":4,"./domTemplates":5,"./errorUtil":6,"./mic/m2v":8,"./mic/processBindingParameters":9,"./mic/v2m":10,"./mic/virtualizeTemplates":11,"./parseUtil":12,"./parser/ylcBind":13,"./parser/ylcEvents":14,"./parser/ylcLoop":15,"./stringUtil":18,"./virtualNodes":20}],20:[function(require,module,exports){
+},{"./annotationProcessor":2,"./contextFactory":3,"./domAnnotator":4,"./domTemplates":5,"./errorUtil":7,"./expressionParser":8,"./metadata":10,"./mixin/m2v":11,"./mixin/processBindingParameters":12,"./mixin/processEventParameters":13,"./mixin/processMoustacheBindings":14,"./mixin/v2m":15,"./mixin/virtualizeTemplates":16,"./parseUtil":17,"./stringUtil":25,"./virtualNodes":27}],27:[function(require,module,exports){
+var metadata = require('./metadata');
+
 module.exports = (function () {
 
     function isVirtual(jqElement) {
@@ -3134,20 +3771,20 @@ module.exports = (function () {
                 return jqElement;
             }
 
-            if (jqElement.data("virtualElement")) {
-                return jqElement.data("virtualElement");
+            if (metadata.localOf(jqElement).virtualElement) {
+                return metadata.localOf(jqElement).virtualElement;
             }
 
             var virtualElement = $("<script type='ylc/virtual'></script>"),
-                originalElement = jqElement.replaceWith(virtualElement);
-            virtualElement.data("originalElement", originalElement);
-            originalElement.data("virtualElement", virtualElement);
+                originalElement = metadata.safeElementReplace(jqElement, virtualElement);
+            metadata.localOf(virtualElement).originalElement = originalElement;
+            metadata.localOf(originalElement).virtualElement = virtualElement;
             return virtualElement;
         },
 
         getOriginal: function(jqElement) {
             if (isVirtual(jqElement)) {
-                return jqElement.data("originalElement");
+                return metadata.localOf(jqElement).originalElement;
             } else {
                 return jqElement;
             }
@@ -3158,7 +3795,7 @@ module.exports = (function () {
             if (isVirtual(jqElement)) {
                 return jqElement;
             } else {
-                jqVirtual = jqElement.data("virtualElement");
+                jqVirtual = metadata.localOf(jqElement).virtualElement;
                 return jqVirtual ? jqVirtual : jqElement;
             }
         },
@@ -3170,7 +3807,7 @@ module.exports = (function () {
     };
 
 }());
-},{}],21:[function(require,module,exports){
+},{"./metadata":10}],28:[function(require,module,exports){
 (function ($) {
 
     "use strict";
@@ -3180,6 +3817,10 @@ module.exports = (function () {
         stringUtil = require('./stringUtil'),
         domTemplates = require('./domTemplates'),
         traversor = require('./traversor');
+
+    $.yellowCode = {
+        standardMixins: []
+    };
 
     $.fn.yellowCode = function (parameter1, parameter2, parameter3) {
 
@@ -3194,7 +3835,22 @@ module.exports = (function () {
                 model = {};
                 controller = parameter1;
 
-                traversor.setupTraversal(model, domView, controller);
+                if ($.isArray(controller)) {
+                    traversor.setupTraversal(
+                        model,
+                        domView,
+                        controller[0],
+                        $.yellowCode.standardMixins.concat(controller.slice(1))
+                    );
+
+                } else {
+                    traversor.setupTraversal(
+                        model,
+                        domView,
+                        controller,
+                        $.yellowCode.standardMixins
+                    );
+                }
 
                 if (typeof parameter2 === "string") {
                     objectToReturn = traversor.triggerExternalEvent(domView, parameter2, parameter3);
@@ -3224,4 +3880,4 @@ module.exports = (function () {
 
 }(jQuery));
 
-},{"./domAnnotator":4,"./domTemplates":5,"./errorUtil":6,"./stringUtil":18,"./traversor":19}]},{},[21]);
+},{"./domAnnotator":4,"./domTemplates":5,"./errorUtil":7,"./stringUtil":25,"./traversor":26}]},{},[28]);

@@ -1,13 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-
-    <script src="//code.jquery.com/jquery-1.11.1.min.js"></script>
+    include "inc/head.html"
     <script src="//code.jquery.com/ui/1.11.2/jquery-ui.min.js"></script>
-    <script src="../yellowCode.min.js"></script>
-
     <link rel="stylesheet" href="//code.jquery.com/ui/1.11.2/themes/black-tie/jquery-ui.css" />
-
 </head>
 
 <body>
@@ -17,7 +13,7 @@
     <div data-ylcLoop="dynamicInput,dynamicInputStatus: dynamicInputs">
         <input
                 data-ylcBind="val: dynamicInput.value"
-                data-ylcEvents="ylcElementInitialized: installDatePicker" />
+                data-ylcElementInit="installDatePicker" />
         <button data-ylcEvents="click: remove">-</button>
     </div>
 </div>

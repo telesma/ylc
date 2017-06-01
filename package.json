@@ -1,8 +1,8 @@
 {
   "name": "ylc",
   "description": "Yellow code - a jQuery plugin for 2-way data binding",
-  "homepage": "http://any3w.com/ylc",
-  "version": "0.99.11",
+  "homepage": "http://any3w.com/ylc/index.html",
+  "version": "0.99.18",
   "licence": "BSD-2-Clause",
   "author": {
     "name": "Pavel Rimsky",
@@ -26,6 +26,9 @@
     "grunt-contrib-copy": "~0.8.0",
     "grunt-text-replace": "~0.4.0",
     "grunt-banner": "~0.3.1",
+    "grunt-contrib-compress": "~1.4.1",
+    
+    "browserify-derequire": "~0.9.4",
 
     "tape": "~2.13.1",
     "tape-dom": "~0.0.10",
@@ -35,6 +38,21 @@
 
     "jsep": "~0.3.0",
 
-    "grunt-contrib-watch": "~0.6.1"
-  }
+    "grunt-contrib-watch": "~0.6.1",
+
+    "grunt-includes": "~1.0.0",
+    "grunt-sass": "~2.0.0",
+    
+    "bottlejs": "~1.5.0"
+  },
+
+  "scripts": {
+    "build": "npm install && grunt"
+  },
+
+  "files": [
+    "dist/js"
+  ],
+  
+  "main": "dist/js/yellowCode.js"
 }

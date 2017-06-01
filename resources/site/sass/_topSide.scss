@@ -1,0 +1,50 @@
+@import "globalScheme";
+@import "buttonScheme";
+@import "topSpacing";
+@import "rightSpacing";
+
+$downloadButtonColor: forestgreen;
+$downloadButtonColorHover: lighten($downloadButtonColor, $buttonHoverLightenAmount);
+$githubButtonColor: brown;
+$githubButtonColorHover: lighten($githubButtonColor, $buttonHoverLightenAmount);
+
+$buttonsTopBottomPadding: 1rem;
+
+.topSide a {
+  @include buttonSkin;
+  display: flex;
+  align-items: center;
+  padding-left: $rightSidePaddingLeft;
+  padding-top: $buttonsTopBottomPadding;
+  padding-bottom: $buttonsTopBottomPadding;
+  width: calc(100% - 2 * 0.5em);
+  height: ($buttonsHeight - 2 * $buttonsTopBottomPadding);
+  margin-bottom: $buttonsSpaceBetween;
+  color: white;
+  .fa {
+    font-size: 2rem;
+    padding-right: 1rem;
+  }
+}
+
+.topSide a.download {
+  background-color: $downloadButtonColor;
+  border-color: $downloadButtonColor;
+  color: white;
+}
+
+.topSide a.download:hover {
+  background-color: $downloadButtonColorHover;
+  border-color: $downloadButtonColorHover;
+}
+
+.topSide a.github {
+  background-color: $githubButtonColor;
+  border-color: $githubButtonColor;
+  color: white;
+}
+
+.topSide a.github:hover {
+  background-color: $githubButtonColorHover;
+  border-color: $githubButtonColorHover;
+}

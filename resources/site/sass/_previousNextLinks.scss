@@ -1,0 +1,25 @@
+@import "globalScheme";
+
+$padding: 0.4rem;
+
+.previousNextLinks {
+  display: block;
+  width: calc(100% - 2 * #{$padding});
+  margin-top: 1.6rem;
+  background-color: #F0F0F0;
+  border-radius: $borderRadius;
+  padding: $padding;
+  font-weight: bold;
+  
+  .previous {
+    display: inline-block;
+    width: 50%;
+    text-align: left;
+  }
+
+  .next {
+    display: inline-block;
+    width: 50%;
+    text-align: right;
+  }
+}

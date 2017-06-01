@@ -1,0 +1,26 @@
+@import "globalScheme";
+@import "rightSpacing";
+
+$topBottomPadding: 0.4rem;
+
+.navigation {
+  list-style-type: none;
+  margin: 0;
+  li {
+    a {
+      display: block;
+      width: calc(100% - 2 * #{$rightSidePaddingLeft});
+      padding: $topBottomPadding $rightSidePaddingLeft;
+    }
+    a:hover {
+      color: white;
+      background-color: darkgreen;
+      border-radius: $borderRadius;
+    }
+  }
+  li.separator {
+    display: block;
+    height: 0.6rem;
+    padding: 0;
+  }
+}
