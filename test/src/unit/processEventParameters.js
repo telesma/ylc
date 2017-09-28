@@ -99,3 +99,73 @@ test(
     }
 
 );
+
+test(
+    "unit: process data-ylcDomChanged",
+    function (t) {
+
+        var jqNode =
+            $("<div data-ylcDomChanged='domChangedHandler(7)'></div>"),
+            metadata = {};
+
+        processEventParameters["@DomPreprocessorFactory"]().nodeStart(jqNode, metadata);
+
+        t.deepEqual(
+            metadata.listeners,
+            {
+                "ylcLifecycle": {
+                    "domChanged": {
+                        "strMethodName": "domChangedHandler",
+                        "arrArgumentsAsts": [
+                            {
+                                "type": "Literal",
+                                "value": 7,
+                                "raw": "7"
+                            }
+                        ]
+                    }
+                },
+                "jsEvents": {}
+            },
+            "correctly parsed"
+        );
+
+        t.end();
+    }
+
+);
+
+test(
+    "unit: process data-ylcChildrenInit",
+    function (t) {
+
+        var jqNode =
+                $("<div data-ylcChildrenInit='initDone(7)'></div>"),
+            metadata = {};
+
+        processEventParameters["@DomPreprocessorFactory"]().nodeStart(jqNode, metadata);
+
+        t.deepEqual(
+            metadata.listeners,
+            {
+                "ylcLifecycle": {
+                    "childrenInit": {
+                        "strMethodName": "initDone",
+                        "arrArgumentsAsts": [
+                            {
+                                "type": "Literal",
+                                "value": 7,
+                                "raw": "7"
+                            }
+                        ]
+                    }
+                },
+                "jsEvents": {}
+            },
+            "correctly parsed"
+        );
+
+        t.end();
+    }
+
+);

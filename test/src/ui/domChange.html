@@ -1,0 +1,15 @@
+<div>
+    <button id="valueChangeInSubtree" data-ylcEvents="click: valueChangeInSubtree">Update in subtree</button>
+    <button id="valueChangeOutsideSubtree" data-ylcEvents="click: valueChangeOutsideSubtree">Update outside subtree</button>
+    <button id="structuralChangeInSubtree" data-ylcEvents="click: structuralChangeInSubtree">Update in subtree</button>
+    <button id="structuralChangeOutsideSubtree" data-ylcEvents="click: structuralChangeOutsideSubtree">Update outside subtree</button>
+    
+    <div data-ylcLoop="value: listForSubtree" data-ylcDomChanged="subtreeChanged">
+        <span>{{value}}</span>
+    </div>
+
+    <div data-ylcLoop="value: anotherList">
+        <span>{{value}}</span>
+    </div>
+
+</div>

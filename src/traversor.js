@@ -1,6 +1,4 @@
 var errorUtil = require('./errorUtil'),
-    stringUtil = require('./stringUtil'),
-    parseUtil = require('./parseUtil'),
     domTemplates = require('./domTemplates'),
     domAnnotator = require('./domAnnotator'),
     contextFactory = require('./contextFactory'),
@@ -12,8 +10,7 @@ var errorUtil = require('./errorUtil'),
     micM2v = require('./mixin/m2v'),
     micV2m = require('./mixin/v2m'),
     processMoustacheBindings = require('./mixin/processMoustacheBindings'),
-    metadata = require('./metadata'),
-    expressionParser = require('./expressionParser');
+    metadata = require('./metadata');
 
 module.exports = {};
 
@@ -162,9 +159,16 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
         } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
             nElementsProcessed = 1;
 
+        } else if (metadata.localOf($(domElement)).flashElementProcessed) {
+            nElementsProcessed = 1;
+
         } else {
             v2mSetValues(domElement);
             v2mProcessChildren(domElement);
+            
+            if (metadata.of($(domElement)).flashIdDefined) {
+                metadata.localOf($(domElement)).flashElementProcessed = true;
+            }
             nElementsProcessed = 1;
         }
 
@@ -257,7 +261,9 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
             $.each(
                 m2v,
                 function (idx, m2v) {
-                    m2v(domElement, my.context);
+                    if (m2v(domElement, my.context)) {
+                        domMutated();
+                    }
                 }
             );
         }
@@ -332,27 +338,57 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
     }
 
     function onElementInit(domElement) {
-
         var jqElement = $(domElement),
-            listeners = metadata.of(jqElement).listeners,
-            publicContext = createPublicContext(domElement);
+            listeners = metadata.of(jqElement).listeners;
 
         if (listeners && listeners.ylcLifecycle.elementInitialized) {
-            var immediateCallArguments = [my.model, publicContext];
-            if (listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts) {
-                Array.prototype.push.apply(
-                    immediateCallArguments,
-                    evaluateArguments(
-                        listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts,
-                        my.context.getLoopContextMemento()
-                    )
-                );
-            }
-            getHandler(
-                "element initialized",
-                listeners.ylcLifecycle.elementInitialized.strMethodName
-            ).apply(my.controller, immediateCallArguments);
+            callLifecycleHandler(
+                listeners.ylcLifecycle.elementInitialized.strMethodName,
+                listeners.ylcLifecycle.elementInitialized.arrArgumentsAsts,
+                createPublicContext(domElement),
+                "element initialized"
+            );
         }
+
+    }
+
+    function onChildrenInit(domElement) {
+        var jqElement = $(domElement),
+            listeners = metadata.of(jqElement).listeners;
+
+        if (listeners && listeners.ylcLifecycle.childrenInit) {
+            callLifecycleHandler(
+                listeners.ylcLifecycle.childrenInit.strMethodName,
+                listeners.ylcLifecycle.childrenInit.arrArgumentsAsts,
+                createPublicContext(domElement),
+                "element initialization done"
+            );
+        }
+    }
+
+    function onDomChanged(domElement) {
+        var jqElement = $(domElement),
+            listeners = metadata.of(jqElement).listeners;
+
+        if (listeners && listeners.ylcLifecycle.domChanged) {
+            callLifecycleHandler(
+                listeners.ylcLifecycle.domChanged.strMethodName,
+                listeners.ylcLifecycle.domChanged.arrArgumentsAsts,
+                createPublicContext(domElement),
+                "DOM changed"
+            );
+        }
+    }
+    
+    function callLifecycleHandler(strMethodName, arrArgumentsAsts, publicContext, strHandlerDescription) {
+        var immediateCallArguments = [my.model, publicContext];
+        if (arrArgumentsAsts) {
+            Array.prototype.push.apply(
+                immediateCallArguments,
+                evaluateArguments(arrArgumentsAsts, my.context.getLoopContextMemento())
+            );
+        }
+        getHandler(strHandlerDescription, strMethodName).apply(my.controller, immediateCallArguments);
     }
 
     function addExtraElements(
@@ -405,11 +441,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
 
             if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
                 jqNewDynamicElement.children().each(function() {
-                    jqLastElement.after($(this));
+                    afterElementAddElement(jqLastElement, $(this));
                     jqLastElement = $(this);
                 });
             } else {
-                jqLastElement.after(jqNewDynamicElement);
+                afterElementAddElement(jqLastElement, jqNewDynamicElement);
                 jqLastElement = jqNewDynamicElement;
             }
 
@@ -425,7 +461,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
         }
     }
     
-    function m2vProcessDynamicLoopElements(jqTemplate, ylcLoop) {
+    function m2vProcessDynamicLoopElements(jqTemplate, ylcLoop, bRebindEvents) {
 
         var domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
             arrCollection = my.context.getValue(ylcLoop.astCollection),
@@ -455,7 +491,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
             domarrCurrentGeneratedElements,
             arrCollection,
             commonLength,
-            bUnderlyingCollectionChanged,
+            bRebindEvents || bUnderlyingCollectionChanged,
             dynamicElementsPerArrayItem
         );
 
@@ -475,14 +511,14 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
             for (index = idxFirstToDelete;
                  index < domarrCurrentGeneratedElements.length;
                  index += 1) {
-                $(domarrCurrentGeneratedElements[index]).remove();
+                removeElement($(domarrCurrentGeneratedElements[index]));
             }
         }
 
         return domarrCurrentGeneratedElements.length + 1;
     }
 
-    function m2vProcessDynamicIfElements(jqTemplate, astYlcIf) {
+    function m2vProcessDynamicIfElements(jqTemplate, astYlcIf, bRebindEvents) {
 
         var ifExpressionValue = my.context.getValue(astYlcIf),
             domarrCurrentGeneratedElements = getGeneratedElements(jqTemplate),
@@ -503,11 +539,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
             if (metadata.of(virtualNodes.getOriginal(jqTemplate)).bRemoveTag) {
                 jqLastElement = jqTemplate;
                 jqNewDynamicElement.children().each(function() {
-                    jqLastElement.after($(this));
+                    afterElementAddElement(jqLastElement, $(this));
                     jqLastElement = $(this);
                 });
             } else {
-                jqTemplate.after(jqNewDynamicElement);
+                afterElementAddElement(jqTemplate, jqNewDynamicElement);
             }
 
         } else if (domarrCurrentGeneratedElements.length > 0) {
@@ -516,7 +552,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
                 $.each(
                     domarrCurrentGeneratedElements,
                     function(idx, domCurrentGeneratedElement) {
-                        m2vProcessElement(domCurrentGeneratedElement, false);
+                        m2vProcessElement(domCurrentGeneratedElement, false, bRebindEvents);
                     }
                 );
 
@@ -524,7 +560,7 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
                 $.each(
                     domarrCurrentGeneratedElements,
                     function(idx, domCurrentGeneratedElement) {
-                        $(domCurrentGeneratedElement).remove();
+                        removeElement($(domCurrentGeneratedElement));
                     }
                 );
             }
@@ -535,16 +571,16 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
 
     }
 
-    function m2vProcessDynamicElements(jqTemplate) {
+    function m2vProcessDynamicElements(jqTemplate, bRebindEvents) {
 
         var metadataObj = metadata.of(virtualNodes.getOriginal(jqTemplate));
 
         if (metadataObj.ylcLoop) {
-            return m2vProcessDynamicLoopElements(jqTemplate, metadataObj.ylcLoop);
+            return m2vProcessDynamicLoopElements(jqTemplate, metadataObj.ylcLoop, bRebindEvents);
         }
 
         if (metadataObj.astYlcIf) {
-            return m2vProcessDynamicIfElements(jqTemplate, metadataObj.astYlcIf);
+            return m2vProcessDynamicIfElements(jqTemplate, metadataObj.astYlcIf, bRebindEvents);
         }
 
         errorUtil.assert(false);
@@ -564,7 +600,6 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
             domChild = jqsetChildren[index];
 
             try {
-
                 index +=
                     m2vProcessElement(
                         domChild,
@@ -700,8 +735,30 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
 
         publicContext.domElement = domElement;
         publicContext.loopStatuses = my.context.getLoopStatusesSnapshot();
+        
         publicContext.updateModel = function (fnUpdateMethod) {
             return callModelUpdatingMethod(publicContext, fnUpdateMethod);
+        };
+        
+        publicContext.flash = function() {
+            var flashIds = arguments,
+                index;
+            
+            for (index = 0; index < flashIds.length; index += 1) {
+                my.model._ylcFlash[flashIds[index]] = true;
+            };
+            
+
+            setTimeout(
+                function() {
+                    publicContext.updateModel(function(model) {
+                        for (index = 0; index < flashIds.length; index += 1) {
+                            model._ylcFlash[flashIds[index]] = false;
+                        };
+                    });
+                },
+                0
+            );
         };
 
         publicContext.controllerMethods = {};
@@ -719,31 +776,87 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
 
         var nElementsProcessed;
 
-        if (domTemplates.isTemplate(domElement)) {
-            nElementsProcessed = m2vProcessDynamicElements($(domElement));
+        var nMutations = 0;
+        pushDomMutationCallback(
+            function() {
+                nMutations += 1;
+            }
+        );
 
-        } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
-            nElementsProcessed = 1;
+        try {
+        
+            if (domTemplates.isTemplate(domElement)) {
+                nElementsProcessed = m2vProcessDynamicElements($(domElement), bBindEvents);
+    
+            } else if (domElement !== my.domView && domAnnotator.isViewRoot($(domElement))) {
+                nElementsProcessed = 1;
+    
+            } else if ((metadata.of($(domElement)).bHasM2v === 0) && !bFirstVisit && !bBindEvents) {
+                nElementsProcessed = 1;
 
-        } else if ((metadata.of($(domElement)).bHasM2v === 0) && !bFirstVisit && !bBindEvents) {
-            nElementsProcessed = 1;
+            } else if (metadata.localOf($(domElement)).flashElementProcessed) {
+                nElementsProcessed = 1;
+                
+            } else {
+                if (bFirstVisit) {
+                    onElementInit(domElement);
+                }
+    
+                if (bBindEvents) {
+                    m2vBindEvents(domElement);
+                }
+    
+                m2vSetValues(domElement);
+                m2vProcessChildren(domElement, bFirstVisit, bBindEvents);
 
-        } else {
-            if (bFirstVisit) {
-                onElementInit(domElement);
+                if (metadata.of($(domElement)).flashIdDefined) {
+                    metadata.localOf($(domElement)).flashElementProcessed = true;
+                }
+
+                if (bFirstVisit) {
+                    onChildrenInit(domElement);
+                }
+                
+                nElementsProcessed = 1;
             }
 
-            if (bBindEvents) {
-                m2vBindEvents(domElement);
+            if (nMutations > 0) {
+                onDomChanged(domElement);
             }
+            
+            return nElementsProcessed;
 
-            m2vSetValues(domElement);
-            m2vProcessChildren(domElement, bFirstVisit, bBindEvents);
-
-            nElementsProcessed = 1;
+        } finally {
+            popDomMutationCallback();
         }
+        
+    }
+    
+    function afterElementAddElement(jqAfterWhat, jqWhat) {
+        jqAfterWhat.after(jqWhat);
+        domMutated();
+    }
+    
+    function removeElement(jqElement) {
+        jqElement.remove();
+        domMutated();
+    }
 
-        return nElementsProcessed;
+    function domMutated() {
+        $.each(
+            my.domMutationCallbacks,
+            function(index, fnCallback) {
+                fnCallback();
+            }
+        );
+    }
+    
+    function pushDomMutationCallback(fnCallback) {
+        my.domMutationCallbacks.push(fnCallback);
+    }
+    
+    function popDomMutationCallback() {
+        my.domMutationCallbacks.pop();
     }
 
     function getProperties(object) {
@@ -835,7 +948,11 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
         $.each(
             listeners,
             function (idx, listener) {
-                preprocessingResult = listener.nodeStart(jqNode, metadataObj);
+                try {
+                    preprocessingResult = listener.nodeStart(jqNode, metadataObj);
+                } catch (error) {
+                    throw errorUtil.elementToError(error, jqNode.get(0));
+                }
                 if ($.isPlainObject(preprocessingResult)) {
                     bMakeVirtual |= preprocessingResult.bMakeVirtual;
                     bHasV2m |= preprocessingResult.bHasV2m;
@@ -913,6 +1030,8 @@ module.exports.setupTraversal = function(pModel, pDomView, pController, pMixins)
         afterEvent: [],
         domPreprocessors: []
     };
+    
+    my.domMutationCallbacks = [];
 
     my.controllerMethods =
         extractControllerMethods(
